@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Replay - Survival Agent</title>
+<link rel="stylesheet" href="/assets/ui.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="shell"></div>
+
+  <nav class="tabs" id="tabs">
+    <a href="#run" data-tab="run">Replay run</a>
+    <a href="#studies" data-tab="studies">Studies</a>
+    <a href="#results" data-tab="results">Results</a>
+    <a href="#runs" data-tab="runs">Past runs</a>
+  </nav>
+
+  <section id="banner0">
+    <h2>What this page is, and what it does not prove</h2>
+    <p class="lead">Replay is for <b>tests only</b>: an accelerated run of the LLM bots on historical candles, using the real strategy code (prompt, reply parsing, entry, rotation, stake) on data as it was at time t, with the bots' own exit constants. Training, the live reference, calibration and the Kronos signal work are on <a href="/calibration">Training &amp; calibration</a>.</p>
+    <p class="lead">Nothing is traded and no live state changes: everything is written only under <code>/data/replay/</code>. There is no news for the past, so the prompt tells the model &ldquo;unavailable for a historical run&rdquo;. Replay <b>never</b> sets the status <code>edge</code>: the most it can say is <code>unproven (replay)</code>.</p>
+    <div class="rbanner" id="permBanner">Historical run. A negative result is a strong argument against a bot; a positive one is a weak argument. The status edge is given only from live data.</div>
+  </section>
+
+  <section id="progress">
+    <h2>Progress <span class="badge" id="phaseBadge">idle</span></h2>
+    <div class="bar"><div id="barFill"></div></div>
+    <div id="counters" class="tiles" style="margin-top:10px"></div>
+    <div class="inline" style="margin:8px 0"><button id="btnStop" type="button" disabled>Stop</button><span id="progMsg" class="meta"></span><a id="logLink" href="#" style="display:none">Download this run's log</a></div>
+    <pre id="logBox" class="logbox" style="max-height:200px">log is empty</pre>
+  </section>
+
+  <!-- ===================== RUN ===================== -->
+  <div class="tab" id="tab-run">
+    <section id="form">
+      <h2>Run</h2>
+      <div class="grid2">
+        <div><label>Bots</label><div id="botBoxes"></div></div>
+        <div>
+          <label>Modes</label>
+          <div><label><input type="checkbox" id="mNamed" checked> named (as is)</label> <label><input type="checkbox" id="mAnon" checked> anonymized (ASSET_NN, relative time)</label></div>
+          <div class="meta">An edge only in named mode suggests the model remembers the period: the result is invalid.</div>
+        </div>
+        <div><label>Period, days (7–60)</label><input type="number" id="days" min="7" max="60" value="30"></div>
+        <div><label>Window end (UTC, not later than &ldquo;now &minus; 48 h&rdquo;)</label><input type="date" id="endDate"></div>
+        <div><label>Number of pairs</label><input type="number" id="pairs" min="3" max="50" value="20"></div>
+        <div><label>Decision step (candles)</label><select id="everyN"></select></div>
+        <div><label>Limit, $</label><input type="number" id="maxUsd" min="0.1" step="0.1" value="10"></div>
+        <div><label>max_calls</label><input type="number" id="maxCalls" min="1" value="200000"></div>
+        <div style="grid-column:1/-1"><label><input type="checkbox" id="phase4" disabled> Phase 4: allocator by day on simulated data</label>
+          <span class="meta">not available: enabled after phases 1–3 are accepted</span></div>
+      </div>
+      <div class="grid2" style="margin-top:12px">
+        <div><label>Model (provider)</label><select id="provider"></select>
+          <div class="meta" id="providerNote">DeepSeek is the live bots' model. Another model is for smoke tests and a separate &ldquo;different model on the same data&rdquo; experiment only; results of different models are not comparable as equals.</div></div>
+        <div>
+          <label><input type="checkbox" id="addRule" checked> add the no-LLM rule (formulas from the strategies; same period, pairs, exits and fees)</label><br>
+          <label><input type="checkbox" id="minutePrices" checked> minute prices (more accurate fills and ROI / stop order inside the hour; the first load is slower)</label>
+        </div>
+      </div>
+      <div class="note" style="margin-top:10px" id="frozenBox">
+        <label><input type="checkbox" id="frozenOn"> <b>frozen</b> mode: the same decisions as an earlier run, different exit rules (no model calls, $0)</label>
+        <div id="frozenForm" style="display:none;margin-top:8px">
+          <label>Source run <select id="frozenFrom"></select></label>
+          <div class="meta">Decisions are taken as they were. The effect of trade results on the prompt (&ldquo;recent results&rdquo;) is <b>not recomputed</b>. Only exits change, not entries.</div>
+          <div style="margin-top:6px"><label><input type="checkbox" class="varBox" value="baseline" checked> baseline (strategy parameters)</label>
+            <label><input type="checkbox" class="varBox" value="no_rotation"> no rotate_stale_signal</label>
+            <label><input type="checkbox" class="varBox" value="hold0"> min hold 0 h</label>
+            <label><input type="checkbox" class="varBox" value="hold4"> 4 h</label>
+            <label><input type="checkbox" class="varBox" value="hold12"> 12 h</label>
+            <label><input type="checkbox" class="varBox" value="hold24"> 24 h</label>
+            <label><input type="checkbox" class="varBox" value="custom"> custom variant</label></div>
+          <div id="customVar" class="grid2" style="display:none;margin-top:6px">
+            <div><label>ROI table (JSON {minutes: share})</label><input type="text" id="cvRoi" placeholder='{"0":0.06,"720":0.03}'></div>
+            <div><label>Stoploss (negative share)</label><input type="text" id="cvStop" placeholder="-0.05"></div>
+            <div><label><input type="checkbox" id="cvTrail"> trailing</label> positive <input type="text" id="cvTrailPos" value="0.01" size="5"> offset <input type="text" id="cvTrailOff" value="0.02" size="5"></div>
+            <div><label><input type="checkbox" id="cvNoRot"> no rotation</label> min hold, h <input type="text" id="cvHold" size="5"></div>
+          </div>
+        </div>
+      </div>
+      <div class="inline" style="margin-top:12px">
+        <button id="btnPilot" type="button">Pilot (7 days, 5 bots, 15 pairs, both modes, $1)</button>
+        <button id="btnEstimate" type="button">Estimate cost</button>
+        <button id="btnStart" type="button" disabled>Start</button>
+        <span id="formMsg" class="meta"></span>
+      </div>
+      <div class="meta" id="priceHint" style="margin-top:6px">The displayed price is conservative (top tier, no cache discount): the real DeepSeek bill per key is 2-3x lower. Check it against the Usage export.</div>
+      <div id="estimateBox" class="note" style="margin-top:10px"></div>
+    </section>
+  </div>
+
+  <!-- ===================== STUDIES ===================== -->
+  <div class="tab" id="tab-studies">
+    <section id="experiments">
+      <h2>Studies</h2>
+      <p class="lead">Research runs. Everything is written only under <code>/data/replay/</code>; live bots, the ledger and the allocator are never touched. No card starts a paid run without an estimate and your confirmation. The verdict is computed by code against thresholds fixed in advance and shown as one badge: <span class="vb vb-edge">edge candidate</span> <span class="vb vb-unp">unproven</span> <span class="vb vb-no">no edge</span> <span class="vb vb-ins">insufficient n</span>.</p>
+
+      <div class="sub-card" id="lfCard">
+        <h3>Listing Fade: check on every Bybit listing since 2024-01-01 (rules, $0, no LLM)</h3>
+        <div class="meta">The rules are read from the live strategy file (its hash is in the report), without fitting. Taker fees, funding, stop gaps, slippage 0 / 0.1 / 0.3 / 0.5 % (conclusion at 0.3 %), position limits like the live bot. Data: the public Bybit API without keys; delisted instruments (status=Closed) are included.</div>
+        <div id="lfState" class="meta" style="margin-top:6px">loading…</div>
+        <div class="inline" style="margin-top:8px"><button id="lfFetch" type="button">Fetch data</button><span class="meta" id="lfFetchMsg"></span></div>
+        <div id="lfProg" class="meta" style="margin-top:4px"></div>
+        <div class="inline" style="margin-top:10px"><b>Slippage:</b>
+          <label><input type="checkbox" class="lfSlip" value="0" checked> 0 %</label>
+          <label><input type="checkbox" class="lfSlip" value="0.1" checked> 0.1 %</label>
+          <label><input type="checkbox" class="lfSlip" value="0.3" checked> 0.3 % (main conclusion)</label>
+          <label><input type="checkbox" class="lfSlip" value="0.5" checked> 0.5 %</label>
+          <button id="lfRun" type="button">Run study</button><span class="meta" id="lfRunMsg"></span></div>
+        <div id="lfResult" style="margin-top:12px;display:none">
+          <div><span id="lfVerdict" class="vb">-</span> <span class="meta" id="lfVerdictWhy"></span></div>
+          <div class="rbanner" id="lfSurvivor"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="lfTable"></table></div>
+          <canvas id="lfChart" width="900" height="240" style="width:100%;max-width:900px;margin-top:8px"></canvas>
+          <div class="meta" id="lfLive" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><button id="lfCopy" type="button">Copy the result as one line</button><a id="lfZip" href="#">Download all (ZIP)</a><span class="meta" id="lfCopyMsg"></span></div>
+          <pre class="logbox" id="lfLine" style="margin-top:6px;max-height:120px"></pre>
+        </div>
+      </div>
+
+      <div class="sub-card" id="cCard">
+        <h3>Funding carry: long spot, short perpetual, hedged (rules, $0, no LLM)</h3>
+        <div class="meta">Pre-registered: the rules, costs and pass thresholds are fixed in the code before the run. Daily bars on every Bybit USDT perpetual (delisted ones included), BTC + ETH + the top 30 by turnover as of each day.
+          Only perpetuals that have a Bybit spot market (the long leg must exist). Entry when the 3-day funding (annualised) clears twice the round-trip cost spread over the expected hold; exit when it turns negative or at delisting. Real fees, funding, basis (index vs perp) and slippage 0 / 0.3 / 0.6 %.
+          Data: public Bybit API without keys. The first run downloads a few hundred small files (a few minutes) and is resumable. Locked period: before 2025-07-01 (look); out-of-sample after it decides.</div>
+        <div id="cState" class="meta" style="margin-top:6px">loading…</div>
+        <div class="inline" style="margin-top:8px"><button id="cRun" type="button">Run carry study</button><span class="meta" id="cMsg"></span></div>
+        <div id="cResult" style="margin-top:12px;display:none">
+          <div><span id="cVerdict" class="vb">-</span> <span class="meta" id="cVerdictWhy"></span></div>
+          <div class="rbanner" id="cNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="cTable"></table></div>
+          <div class="meta" id="cNow" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="cZip" href="#">Download all (ZIP)</a><a id="cLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="dCard">
+        <h3>Delisting shorts: short a perpetual after its delisting notice (rules, $0, no LLM)</h3>
+        <div class="meta">Every Bybit perpetual-delisting notice since 2024-01-01 that states the delisting time. Short at the first hourly open at least 1 h after the notice, cover the earlier of 72 h, 2 h before the delisting, or a +10% stop.
+          Taker fees, funding, slippage 0.3 / 0.6 / 1.0 % round trip (0.6 primary), entry delay 0 / 1 / 6 / 24 h, a BTC hedge, and a baseline of 20 random shorts per event in the 30 days before the notice. Pre-registered thresholds. Data: Bybit's public announcement archive and hourly candles, no keys.</div>
+        <div id="dState" class="meta" style="margin-top:6px">loading…</div>
+        <div class="inline" style="margin-top:8px"><button id="dRun" type="button">Run delisting study</button><span class="meta" id="dMsg"></span></div>
+        <div id="dResult" style="margin-top:12px;display:none">
+          <div><span id="dVerdict" class="vb">-</span> <span class="meta" id="dVerdictWhy"></span></div>
+          <div class="rbanner" id="dNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="dTable"></table></div>
+          <div class="meta" id="dMore" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="dZip" href="#">Download all (ZIP)</a><a id="dLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="kCard">
+        <h3>Maker fills: can limit orders rescue the costs? (rules, $0, no LLM)</h3>
+        <div class="meta">Costs decide every result here. A limit order pays a 0.02% maker fee and no slippage, but it is not always filled, and the orders that do not fill are the ones where the price ran away. Part 1 prices that for the LightGBM ranker book (limit 0.05 / 0.10 / 0.20% better than the 00:00 open, 1 / 2 / 4 hours to fill, then skip the trade or chase it as a taker; the primary is fixed in advance: 0.10%, 2 hours, chase). Verdict <i>passive pays</i> only if it is no worse than the optimistic taker book, survives skipped trades and at least half of the orders fill. Part 2 asks the same of the Listing Fade entries and shows whether the trades that would not fill are the better ones. Reads the caches of the LightGBM v2 study and of the Listing Fade study (no download); about 15 minutes.</div>
+        <div class="inline" style="margin-top:8px"><button id="kRun" type="button">Run maker-fill study</button><span class="meta" id="kMsg"></span></div>
+        <div id="kResult" style="margin-top:12px;display:none">
+          <div><span id="kVerdict" class="vb">-</span> <span class="meta" id="kVerdictWhy"></span></div>
+          <div class="rbanner" id="kNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="kTable"></table></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="kTable2"></table></div>
+          <div class="meta" id="kMore" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="kZip" href="#">Download all (ZIP)</a><a id="kLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="gCard">
+        <h3>Ranker robustness grid: is the LightGBM lead one lucky setting? (rules, $0, no LLM)</h3>
+        <div class="meta">Re-runs the LightGBM v2 walk-forward for neighbouring settings (hold 2 / 3 / 5 / 7 days x universe 20 / 40 / 60 coins; the same features, fixed model and costs) and counts in how many the out-of-sample rank IC and the net APR stay positive. Verdict: <i>neighbourhood holds</i> (rank IC and APR positive in at least 10 of 12 cells), <i>fragile</i> (IC positive in fewer than 8), else <i>mixed</i>. Nothing is tuned; the 0.30% slippage column and the drawdown show whether the money survives. Reads the Binance cache of the v2 study (no download); about 7 minutes.</div>
+        <div class="inline" style="margin-top:8px"><button id="gRun" type="button">Run robustness grid</button><span class="meta" id="gMsg"></span></div>
+        <div id="gResult" style="margin-top:12px;display:none">
+          <div><span id="gVerdict" class="vb">-</span> <span class="meta" id="gVerdictWhy"></span></div>
+          <div class="rbanner" id="gNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="gTable"></table></div>
+          <div class="meta" id="gMore" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="gZip" href="#">Download all (ZIP)</a><a id="gLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="pCard">
+        <h3>Premium-index features: do they add to the ranker? (rules, $0, no LLM)</h3>
+        <div class="meta">The perpetual's premium to its index (Binance's free archive, hourly) is the market's own crowding gauge. One pre-registered comparison: the 39 v2 features against the same plus 8 premium features (hold 3 d, universe 40). Adopt only if the out-of-sample rank IC rises by at least 0.01, the APR at 0.30% slippage is not lower and the locked-period IC is not lower; otherwise the v2 features stay. Downloads about 15,000 small public files (no key, resumable, about 20 minutes), then about 5 minutes of CPU.</div>
+        <div class="inline" style="margin-top:8px"><button id="pRun" type="button">Run premium study</button><span class="meta" id="pMsg"></span></div>
+        <div id="pResult" style="margin-top:12px;display:none">
+          <div><span id="pVerdict" class="vb">-</span> <span class="meta" id="pVerdictWhy"></span></div>
+          <div class="rbanner" id="pNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="pTable"></table></div>
+          <div class="meta" id="pMore" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="pZip" href="#">Download all (ZIP)</a><a id="pLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="xCard">
+        <h3>Listing Fade exit mechanics: tighter stop and re-entry cooldown (rules, $0, no LLM)</h3>
+        <div class="meta">Live dry-run (4 weeks): 77% winners but break-even, because a few -12% stops (some gapping to -31%) cancel many small trailing wins, and the bot re-shorts a coin an hour after being stopped out.
+          This study replays the live rules on the Listing Fade history (every Bybit listing since 2024, 5-minute candles, fees, funding, stop gaps, 3 slots, re-entry like the live bot) with 8 exit variants (stop -12 / -10 / -8 / -6% x no cooldown / 24 h cooldown after a stop-loss).
+          Only one variant decides, fixed in advance: stop -8% + 24 h cooldown against the live rules, on listings from 2025-07-01 on (paired daily difference with a bootstrap CI, locked period not worse, drawdown not worse, still better at 0.50% slippage). Needs the Listing Fade data above (press Fetch data first). It changes nothing live.</div>
+        <div class="inline" style="margin-top:8px"><button id="xRun" type="button">Run exit study</button><span class="meta" id="xMsg"></span></div>
+        <div id="xResult" style="margin-top:12px;display:none">
+          <div><span id="xVerdict" class="vb">-</span> <span class="meta" id="xVerdictWhy"></span></div>
+          <div class="rbanner" id="xNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="xTable"></table></div>
+          <div class="meta" id="xMore" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="xZip" href="#">Download all (ZIP)</a><a id="xLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="hCard">
+        <h3>LightGBM v2: Binance 2021+, top 40, hourly features (rules, $0, no LLM)</h3>
+        <div class="meta">Same question as the card below with more history, a wider universe and hourly features (order flow, volume and trade surges, range, volatility, funding, BTC regime). Downloads the public Binance archive (about 0.5 GB, no key, cached, resumable), then a walk-forward with a 3-day hold, a shuffled-label placebo of 30 runs, a rank IC and two one-line baselines (14-day momentum, 3-day reversal). It must also stay positive with 0.30% slippage. Pre-registered thresholds; the first download and run take about an hour.</div>
+        <div class="inline" style="margin-top:8px"><button id="hRun" type="button">Run LightGBM v2 study</button><span class="meta" id="hMsg"></span></div>
+        <div id="hResult" style="margin-top:12px;display:none">
+          <div><span id="hVerdict" class="vb">-</span> <span class="meta" id="hVerdictWhy"></span></div>
+          <div class="rbanner" id="hNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="hTable"></table></div>
+          <div class="meta" id="hMore" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="hZip" href="#">Download all (ZIP)</a><a id="hLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="lCard">
+        <h3>LightGBM walk-forward on liquid perpetuals (rules, $0, no LLM)</h3>
+        <div class="meta">A small gradient-boosted model, trained only on the past (retrained every 28 days, first year training only, labels purged), ranks the top 20 perpetuals by their expected 7-day relative return; weekly book long the top 4 and short the bottom 4 with fees, slippage and funding.
+          It must beat a placebo of 20 pipelines trained on shuffled labels, show a positive rank IC, and beat the one-line 14-day momentum rule. Fixed parameters, no search. Reuses the cached daily bars (it fetches them first if needed). Pre-registered thresholds.</div>
+        <div class="inline" style="margin-top:8px"><button id="lRun" type="button">Run LightGBM study</button><span class="meta" id="lMsg"></span></div>
+        <div id="lResult" style="margin-top:12px;display:none">
+          <div><span id="lVerdict" class="vb">-</span> <span class="meta" id="lVerdictWhy"></span></div>
+          <div class="rbanner" id="lNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="lTable"></table></div>
+          <div class="meta" id="lMore" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="lZip" href="#">Download all (ZIP)</a><a id="lLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="mCard">
+        <h3>Cross-sectional momentum on liquid perpetuals (rules, $0, no LLM)</h3>
+        <div class="meta">Top 20 USDT perpetuals by turnover as of each week; long the top 4 and short the bottom 4 by 14-day return (dollar neutral), weekly, with fees, slippage and funding. Only this primary configuration counts for the verdict; the other lookbacks and the long-only book are context.
+          A placebo of 300 random-coin books gives the out-of-sample rank. Reuses the carry study's cached daily bars (it fetches them first if needed). Pre-registered thresholds.</div>
+        <div class="inline" style="margin-top:8px"><button id="mRun" type="button">Run momentum study</button><span class="meta" id="mMsg"></span></div>
+        <div id="mResult" style="margin-top:12px;display:none">
+          <div><span id="mVerdict" class="vb">-</span> <span class="meta" id="mVerdictWhy"></span></div>
+          <div class="rbanner" id="mNote"></div>
+          <div class="tw" style="margin-top:8px"><table class="hist" id="mTable"></table></div>
+          <div class="meta" id="mMore" style="margin-top:8px"></div>
+          <div class="inline" style="margin-top:8px"><a id="mZip" href="#">Download all (ZIP)</a><a id="mLog" href="#">log</a></div>
+        </div>
+      </div>
+
+      <div class="sub-card" id="sCard">
+        <h3>Real short bots (P22-A): shorts_v2, does the model's veto add anything on top of the rule</h3>
+        <div class="meta">The rule creates short candidates (the mirror of the long rule: change over 24 candles &lt; &minus;2 % and volatility &lt; 5 %). The model can only <b>confirm</b> or <b>veto</b>; it cannot create a candidate or open a long. Exits are the parents'. The prompt has a funding line.
+          Compared on one window: with the model's veto, rule only (no LLM, $0), random short entries. The question is whether the veto adds anything to the bare rule. Only candidates reach the LLM, so calls are few; the exact number is shown before the run. This is a replay: the bots are not started live (A3 only after you approve the report).</div>
+        <div class="inline" style="margin-top:8px"><label><input type="checkbox" class="sBot" value="shorts_v2" checked> shorts_v2</label>
+          <label><input type="checkbox" id="sVeto" checked> with the model's veto (paid)</label><span class="meta">(unchecked: rule only, $0)</span></div>
+        <div class="inline" style="margin-top:6px"><label>days <input type="number" id="sDays" value="30" min="7" max="60" style="width:70px"></label><label>pairs <input type="number" id="sPairs" value="13" min="3" max="50" style="width:70px"></label>
+          <label>step (candles) <select id="sEvery"><option>1</option><option selected>2</option><option>4</option><option>8</option></select></label>
+          <label>window end (UTC, optional) <input type="date" id="sEnd"></label></div>
+        <div class="meta" style="margin-top:4px">Window of run 20261005-084124: 30 days to 2026-10-03, 13 pairs, step 2.</div>
+        <div id="sEstimate" class="meta" style="margin-top:6px"></div>
+        <div class="inline" style="margin-top:6px"><button id="sEstBtn" type="button">Estimate (candidates and calls)</button><button id="sStart" type="button" disabled>Start</button><span class="meta" id="sMsg"></span></div>
+        <div id="sResult" style="margin-top:10px"></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== RESULTS ===================== -->
+  <div class="tab" id="tab-results">
+    <section id="results">
+      <h2>Results <span class="meta" id="resId"></span></h2>
+      <div class="rbanner">Historical run. A negative result is a strong argument against a bot; a positive one is a weak argument. The status edge is given only from live data.</div>
+      <div id="resBody" class="note">Pick a run on the Past runs tab, or wait for a run to finish.</div>
+      <canvas id="chart" width="900" height="260" style="width:100%;max-width:900px;display:none"></canvas>
+    </section>
+  </div>
+
+  <!-- ===================== PAST RUNS ===================== -->
+  <div class="tab" id="tab-runs">
+    <section id="runs">
+      <h2>Past runs</h2>
+      <p class="lead">Replay tests only. Calibration runs and Kronos evaluations are listed on <a href="/calibration#reports">Training &amp; calibration</a>; every file is also on the dashboard's <a href="/#downloads">Downloads</a> tab.</p>
+      <div id="runsBody"><span class="meta">loading…</span></div>
+    </section>
+  </div>
+</div>
+
+<script src="/assets/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let CFG = null, lastEstimate = null, currentRun = null;
+const TABS = ['run', 'studies', 'results', 'runs'];
+
+function showTab() {
+  const h = (location.hash || '#run').slice(1);
+  const tab = TABS.includes(h) ? h : 'run';
+  TABS.forEach(t => $('tab-' + t).classList.toggle('on', t === tab));
+  document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
+  if (tab === 'runs') loadRuns();
+}
+window.addEventListener('hashchange', showTab);
+
+function variantsFromForm() {
+  const picked = Array.from(document.querySelectorAll('.varBox:checked')).map(x => x.value);
+  const out = [];
+  picked.forEach(v => {
+    if (v === 'baseline') out.push({ name: 'baseline' });
+    else if (v === 'no_rotation') out.push({ name: 'no_rotation', rotate: false });
+    else if (v.startsWith('hold')) out.push({ name: 'hold_' + v.slice(4) + 'h', min_hold_hours: +v.slice(4) });
+    else if (v === 'custom') {
+      const c = { name: 'custom' };
+      try { if ($('cvRoi').value.trim()) c.roi = JSON.parse($('cvRoi').value); } catch (e) { c.roi = { bad: 0 }; }
+      if ($('cvStop').value.trim()) c.stoploss = +$('cvStop').value;
+      if ($('cvTrail').checked) c.trailing = { enabled: true, positive: +$('cvTrailPos').value, offset: +$('cvTrailOff').value };
+      if ($('cvNoRot').checked) c.rotate = false;
+      if ($('cvHold').value.trim()) c.min_hold_hours = +$('cvHold').value;
+      out.push(c);
+    }
+  });
+  return out;
+}
+
+function params() {
+  const bots = Array.from(document.querySelectorAll('.botBox:checked')).map(x => x.value);
+  const modes = [$('mNamed').checked ? 'named' : null, $('mAnon').checked ? 'anonymized' : null].filter(Boolean);
+  const p = { bots, modes, days: +$('days').value, pairs: +$('pairs').value, every_n: +$('everyN').value, max_usd: +$('maxUsd').value, max_calls: +$('maxCalls').value,
+    provider: $('provider').value || 'deepseek', add_rule: $('addRule').checked, minute_prices: $('minutePrices').checked };
+  if ($('endDate').value) p.end = $('endDate').value + 'T00:00:00+00:00';
+  if ($('frozenOn').checked) { p.frozen_from = $('frozenFrom').value; p.variants = variantsFromForm(); }
+  return p;
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/replay/config');
+    const txt = await r.text();
+    CFG = JSON.parse(txt);
+    if (!r.ok || !CFG.bots) throw new Error('HTTP ' + r.status + ' ' + txt.slice(0, 200));
+  } catch (e) {
+    CFG = null;
+    $('formMsg').innerHTML = '<span style="color:var(--red)">Could not load the replay settings (' + esc(e.message) + '). The bot and model lists are empty. See the survival-agent container log.</span>';
+    throw e;
+  }
+  $('botBoxes').innerHTML = CFG.bots.map(b => '<label style="margin-right:10px"><input type="checkbox" class="botBox" value="' + b.key + '"' + (b.default ? ' checked' : '') + '> ' + b.key + (b.default ? '' : (/_v2$/.test(b.key) ? ' (P22-A, replay only)' : ' (stopped)')) + '</label>').join('');
+  $('everyN').innerHTML = CFG.every_n_choices.map(n => '<option' + (n === CFG.defaults.every_n ? ' selected' : '') + '>' + n + '</option>').join('');
+  $('maxUsd').max = CFG.limits.max_usd; $('maxUsd').value = Math.min(CFG.limits.max_usd, 10);
+  $('maxCalls').value = CFG.limits.max_calls;
+  $('provider').innerHTML = Object.keys(CFG.providers).map(k => { const pr = CFG.providers[k]; return '<option value="' + k + '"' + (pr.ready ? '' : ' disabled') + (k === CFG.default_provider ? ' selected' : '') + '>' + esc(pr.label) + (pr.ready ? '' : ' — not set up: ' + esc(pr.problem)) + '</option>'; }).join('');
+  $('addRule').checked = CFG.defaults.add_rule; $('minutePrices').checked = CFG.defaults.minute_prices;
+  loadFrozenSources();
+  const lim = CFG.limits;
+  $('formMsg').textContent = 'limits: $' + lim.max_usd + ', workers ' + lim.workers + ', not earlier than ' + lim.min_start + (lim.price_in_per_m === null ? ' · REPLAY_PRICE_*_PER_M ARE NOT SET: a run is not possible' : '');
+}
+
+async function loadFrozenSources() {
+  const j = await fetch('/api/replay/runs').then(r => r.json()).catch(() => ({ runs: [] }));
+  const ok = j.runs.filter(r => r.has_report && (r.type || 'replay') === 'replay');
+  $('frozenFrom').innerHTML = ok.length ? ok.map(r => '<option value="' + esc(r.run_id) + '">' + esc(r.run_id) + ' · ' + esc((r.params.bots || []).join(',')) + '</option>').join('') : '<option value="">no suitable runs</option>';
+}
+
+function pilot() {
+  document.querySelectorAll('.botBox').forEach(b => { b.checked = CFG.defaults.pilot.bots.includes(b.value); });
+  $('mNamed').checked = $('mAnon').checked = true;
+  $('days').value = 7; $('everyN').value = 4; $('pairs').value = CFG.defaults.pilot.pairs; $('maxUsd').value = Math.min(1, CFG.limits.max_usd);
+  invalidateEstimate();
+}
+
+function invalidateEstimate() { lastEstimate = null; $('btnStart').disabled = true; $('btnStart').textContent = 'Start'; }
+
+async function doEstimate() {
+  if (!$('frozenOn').checked && !document.querySelector('.botBox:checked')) { $('estimateBox').innerHTML = '<span style="color:var(--red)">Pick at least one bot.</span>'; return; }
+  $('estimateBox').textContent = 'estimating: building a few real prompts (loading Bybit candles, no LLM call)…';
+  invalidateEstimate();
+  const r = await fetch('/api/replay/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params()) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('estimateBox').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status + ' (the server gave no reason: see the survival-agent log)')) + '</span>'; return; }
+  lastEstimate = j;
+  $('estimateBox').innerHTML = '<b>' + j.calls + '</b> LLM calls · ~' + esc(j.avg_input_tokens) + ' input tokens per call · <b>$' + esc(j.usd) + '</b> · ~' + Math.round(j.seconds / 60) + ' min (rough)' +
+    (j.within_limits ? '' : ' <b style="color:var(--red)">— over the limit ($' + esc(j.params.max_usd) + ' / ' + esc(j.params.max_calls) + ' calls)</b>') +
+    (j.prices_known ? '' : ' <b style="color:var(--red)">— REPLAY_PRICE_*_PER_M are not set</b>') + (j.model ? '<br>model: <b>' + esc(j.model) + '</b>' + (j.rpm ? ' · limit ' + j.rpm + ' req/min, ' + j.daily_cap + ' calls/day' + (j.days_needed_for_daily_cap > 1 ? ' → needs ' + j.days_needed_for_daily_cap + ' days (the run can be resumed: finished work comes from the cache)' : '') : '') : '') +
+    '<br><span class="meta">' + esc(j.price_note) + '<br>' + esc(j.note) + '</span>';
+  $('btnStart').disabled = !j.within_limits || !j.prices_known;
+  $('btnStart').textContent = 'Start (up to $' + j.usd + ')';
+}
+
+async function doStart() {
+  if (!lastEstimate) return;
+  if (!confirm('Start the replay? Estimate: $' + lastEstimate.usd + ', ' + lastEstimate.calls + ' LLM calls. The run stops when it exceeds the $' + lastEstimate.params.max_usd + ' limit.')) return;
+  const r = await fetch('/api/replay/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params()) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('progMsg').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status + ' (the server gave no reason: see the survival-agent log)')) + '</span>'; return; }
+  currentRun = j.run_id; invalidateEstimate(); poll();
+}
+
+async function poll() {
+  const s = await fetch('/api/replay/status').then(r => r.json()).catch(() => null);
+  if (!s) return;
+  const running = s.phase && !['idle', 'done', 'failed'].includes(s.phase);
+  $('phaseBadge').textContent = s.phase + (s.status && s.status !== 'running' ? ' · ' + s.status : '');
+  const pr = s.progress || {}, llm = s.llm || {};
+  $('barFill').style.width = Math.round((pr.fraction || 0) * 100) + '%';
+  $('counters').innerHTML = [['decisions', pr.decisions], ['trades', pr.trades], ['$ spent', llm.usd], ['LLM calls / cache', (llm.calls || 0) + ' / ' + (llm.cache_hits || 0)],
+    ['speed, dec./min', pr.decisions_per_min], ['elapsed, s', s.elapsed_s], ['remaining, s', s.eta_s === null || s.eta_s === undefined ? '-' : s.eta_s], ['steps', (pr.steps_done || 0) + ' / ' + (pr.steps_total || 0)]]
+    .map(x => '<div class="tile"><div class="name">' + x[0] + '</div><div class="pct">' + esc(x[1] === undefined ? '-' : x[1]) + '</div></div>').join('');
+  $('logBox').textContent = (s.log || []).join('\n') || 'log is empty';
+  $('logBox').scrollTop = $('logBox').scrollHeight;
+  $('btnStop').disabled = !running;
+  if (s.run_id) { $('logLink').style.display = 'inline'; $('logLink').href = '/api/replay/runs/' + encodeURIComponent(s.run_id) + '/log'; }
+  if (s.kind === 'lf_fetch' && s.lf) { const l = s.lf; $('lfProg').textContent = (l.phase || '') + ' · listings found ' + (l.listings_found || 0) + ', hourly/funding ' + (l.hourly_done || 0) + ', 5-min windows ' + (l.m5_done || 0) + '/' + (l.m5_total || 0) + ' · API calls ' + (l.api_calls || 0) + ', API errors ' + (l.api_errors || 0) + ', symbols with errors ' + (l.symbol_errors || 0); }
+  if (s.kind === 'lf_fetch' && !running) lfLoadState();
+  if (s.kind === 'carry_study' && !running) cLoadState();
+  if (s.kind === 'delist_study' && !running) dLoadState();
+  if (s.error) $('progMsg').innerHTML = '<span style="color:var(--red)">' + esc(s.error) + '</span>';
+  if (running) setTimeout(poll, 1000);
+  else if (s.run_id && s.phase === 'done' && s.kind !== 'kronos_eval' && s.kind !== 'calibration') { openRun(s.run_id); loadRuns(); }
+}
+
+async function doStop() { await fetch('/api/replay/stop', { method: 'POST' }); $('progMsg').textContent = 'stop requested (what is computed stays saved)'; }
+
+function fmt(x) { return x === null || x === undefined ? '-' : x; }
+
+function vbadge(v) {
+  const cls = { 'edge candidate': 'vb-edge', 'unproven': 'vb-unp', 'no edge': 'vb-no', 'insufficient n': 'vb-ins', 'neighbourhood holds': 'vb-edge', 'passive pays': 'vb-edge', 'no better': 'vb-no', 'mixed': 'vb-unp', 'fragile': 'vb-no', 'adopt': 'vb-edge', 'keep v2 features': 'vb-unp', 'better candidate': 'vb-edge', 'not better': 'vb-no' }[v] || '';
+  return '<span class="vb ' + cls + '">' + esc(v) + '</span>';
+}
+
+// ---------------------------------------------------------------- Listing Fade study
+async function lfLoadState() {
+  const j = await fetch('/api/replay/lf/state').then(r => r.json()).catch(() => null);
+  if (!j) { $('lfState').textContent = 'could not read the state'; return; }
+  const i = j.instruments;
+  $('lfState').innerHTML = i ? ('cache: ' + i.n + ' listings (trading ' + i.n_trading + ', delisted ' + i.n_closed + '), hourly files with data ' + j.hourly_with_data + ', funding ' + j.funding_files + ', 5-minute windows ' + j.m5_files +
+    (j.last_fetch ? ' · last fetch: API calls ' + j.last_fetch.api_calls + ', API errors ' + j.last_fetch.api_errors + ', symbols with errors ' + j.last_fetch.symbol_errors + (j.last_fetch.stopped ? ' (stopped)' : '') : '')) :
+    'no data yet: press Fetch data (≈ ' + j.estimate.api_calls_if_nothing_cached + ' public API calls, $0, can be stopped and resumed)';
+  $('lfRun').disabled = !j.data_ready;
+}
+
+async function lfDoFetch() {
+  if (!confirm('Fetch the Listing Fade data? Public Bybit API, no keys, $0. What is already downloaded is not requested again; the fetch can be stopped and resumed.')) return;
+  const r = await fetch('/api/replay/lf/fetch', { method: 'POST' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('lfFetchMsg').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>'; return; }
+  $('lfFetchMsg').textContent = 'fetch started (progress below and in the Progress block)';
+  poll();
+}
+
+async function lfDoRun() {
+  const slips = Array.from(document.querySelectorAll('.lfSlip:checked')).map(x => +x.value);
+  if (!slips.length) { $('lfRunMsg').innerHTML = '<span style="color:var(--red)">pick at least one slippage</span>'; return; }
+  if (!confirm('Run the Listing Fade study? From the cache, no network, no model, $0.')) return;
+  const r = await fetch('/api/replay/lf/study', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slippages_pct: slips }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('lfRunMsg').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>'; return; }
+  $('lfRunMsg').textContent = 'started ' + j.run_id; currentRun = j.run_id; poll();
+}
+
+function lfDraw(j) {
+  const cv = $('lfChart'), ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const keys = Object.keys(j.scenarios).filter(k => k.indexOf('_slots_live_flagged_excluded') > 0);
+  const series = keys.map(k => ({ name: k.split('_')[0].replace('slip', 'slip ') + '%', pts: j.scenarios[k].equity_curve, main: k === j.primary })).filter(s => s.pts.length > 1);
+  if (!series.length) { ctx.fillStyle = '#8A968D'; ctx.fillText('no closed trades for a curve', 10, 20); return; }
+  const all = series.flatMap(s => s.pts.map(p => p[1])), lo = Math.min(...all), hi = Math.max(...all);
+  const ts = series.flatMap(s => s.pts.map(p => new Date(p[0]).getTime())), t0 = Math.min(...ts), t1 = Math.max(...ts);
+  const X = p => 40 + (new Date(p[0]).getTime() - t0) / (t1 - t0 || 1) * (cv.width - 60), Y = v => cv.height - 20 - (v - lo) / (hi - lo || 1) * (cv.height - 40);
+  ctx.strokeStyle = '#223029'; ctx.fillStyle = '#8A968D'; ctx.font = '11px monospace';
+  [lo, (lo + hi) / 2, hi].forEach(v => { ctx.beginPath(); ctx.moveTo(40, Y(v)); ctx.lineTo(cv.width - 10, Y(v)); ctx.stroke(); ctx.fillText(v.toFixed(1), 2, Y(v) + 3); });
+  const colors = ['#7aa2f7', '#b48ead', '#7FA37A', '#D9A441'];
+  let lx = 44;
+  series.forEach((s, i) => { ctx.strokeStyle = s.main ? '#7FA37A' : colors[i % 4]; ctx.lineWidth = s.main ? 2.2 : 1.1; ctx.beginPath(); s.pts.forEach((p, k) => { const x = X(p), y = Y(p[1]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+    ctx.fillStyle = s.main ? '#7FA37A' : colors[i % 4]; ctx.fillText(s.name + (s.main ? ' (main)' : ''), lx, 12); lx += 110; });
+}
+
+function renderLf(id, j) {
+  $('resId').textContent = id + ' · Listing Fade';
+  $('lfResult').style.display = 'block';
+  $('lfVerdict').outerHTML = '<span id="lfVerdict">' + vbadge(j.verdict) + '</span>';
+  $('lfVerdictWhy').textContent = 'basis: ' + j.primary + (j.verdict_failed_conditions.length ? ' · not met: ' + j.verdict_failed_conditions.join('; ') : '') + ' · opportunity set (no slot limit): ' + j.opportunity_set_verdict;
+  const u = j.universe;
+  $('lfSurvivor').innerHTML = '<b>Survivorship bias.</b> Listings found ' + u.listings_found + ' (trading ' + u.currently_trading + ', delisted included ' + u.delisted_closed_included + '), with data ' + u.with_candle_data + ', without data ' + u.without_candle_data + '. ' + esc(u.warning);
+  const rows = Object.keys(j.scenarios).map(k => { const s = j.scenarios[k]; return '<tr' + (k === j.primary ? ' style="outline:1px solid var(--green)"' : '') + '><td>' + esc(k) + '</td><td>' + s.n_trades + '</td><td>' + fmt(s.mean_trade_pct) + '</td><td>' + fmt(s.median_trade_pct) + '</td><td>' + fmt(s.win_pct) + '</td><td>' + esc(JSON.stringify(s.ci95_pct)) +
+    '</td><td>' + s.net_usd + '</td><td>' + s.max_drawdown_pct + '</td><td>' + fmt(s.first_half.mean_trade_pct) + ' / ' + fmt(s.second_half.mean_trade_pct) + '</td><td>' + s.worst_stop_gap_pct + '</td><td>' + vbadge(s.verdict) + '</td></tr>'; }).join('');
+  $('lfTable').innerHTML = '<tr><th>scenario</th><th>trades</th><th>mean %</th><th>median %</th><th>win %</th><th>95% CI</th><th>net $</th><th>max drawdown %</th><th>1st / 2nd half %</th><th>worst stop gap %</th><th>verdict</th></tr>' + rows;
+  const lc = j.live_comparison;
+  $('lfLive').innerHTML = lc.available ? ('<b>Against the live dry run (same rules and dates):</b> live ' + lc.n_live + ' / replay ' + lc.n_replay + ', matched ' + lc.matched + ', mean ' + lc.live_mean_trade_pct + ' % → ' + lc.replay_mean_trade_pct + ' %, per-trade difference (median) ' + fmt(lc.per_trade_diff_pp.median) + ' pp, exits agree ' + fmt(lc.exit_reason_agreement) + '. ' + esc(lc.note)) : esc(lc.note);
+  $('lfLine').textContent = j.summary_line;
+  $('lfZip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  lfDraw(j);
+  $('resBody').innerHTML = '<div class="meta">The Listing Fade result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+// ---------------------------------------------------------------- funding carry study (P25)
+async function cLoadState() {
+  const j = await fetch('/api/replay/carry/state').then(r => r.json()).catch(() => null);
+  if (!j) { $('cState').textContent = 'could not read the state'; return; }
+  $('cState').textContent = j.data_ready ? ('cache: ' + j.pool + ' symbols, ' + j.with_data + ' with data. Running again only fetches what is new.') : (j.reason || 'no data yet');
+}
+
+async function cRun() {
+  if (!confirm('Run the funding carry study? It downloads public Bybit history (no key, $0, resumable) and then simulates. A few minutes the first time.')) return;
+  const r = await fetch('/api/replay/carry/study', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('cMsg').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>'; return; }
+  $('cMsg').textContent = 'started ' + j.run_id + ' (progress in the Progress block)'; currentRun = j.run_id; poll();
+}
+
+function renderCarry(id, j) {
+  $('resId').textContent = id + ' · funding carry';
+  $('cResult').style.display = 'block';
+  $('cVerdict').outerHTML = '<span id="cVerdict">' + vbadge(j.verdict) + '</span>';
+  $('cVerdictWhy').textContent = 'basis: ' + j.primary + ' · window ' + j.window.start + ' … ' + j.window.end + ' (out-of-sample from ' + j.window.lock_end + ')' + (j.edge_over_majors_oos_pp !== null ? ' · over BTC/ETH-only: ' + j.edge_over_majors_oos_pp + ' pp' : '');
+  $('cNote').innerHTML = j.verdict_failed_conditions.length ? '<b>Not met:</b> ' + j.verdict_failed_conditions.map(esc).join('; ') : 'All pre-registered conditions met. This is a hypothesis for a small real-money test, not proof.';
+  const rows = [];
+  Object.keys(j.scenarios).forEach(k => ['all', 'locked', 'oos'].forEach(per => { const s = j.scenarios[k][per];
+    rows.push('<tr' + (k === j.primary && per === 'oos' ? ' style="outline:1px solid var(--green)"' : '') + '><td>' + esc(k) + '</td><td>' + per + '</td><td>' + s.episodes + '</td><td>' + fmt(s.mean_episode_pct) + '</td><td>' + esc(JSON.stringify(s.ci95_pct)) + '</td><td>' + fmt(s.worst_episode_pct) + '</td><td>' + s.net_usd + '</td><td>' + s.apr_on_sleeve_pct + '</td><td>' + s.apr_on_deployed_pct + '</td><td>' + fmt(s.max_dd_pct_of_sleeve) + '</td><td>' + s.avg_deployed_pct + '</td></tr>'); }));
+  $('cTable').innerHTML = '<tr><th>scenario</th><th>period</th><th>episodes</th><th>mean episode %</th><th>95% CI</th><th>worst %</th><th>net $ (3000 sleeve)</th><th>APR sleeve %</th><th>APR deployed %</th><th>max DD % sleeve</th><th>deployed %</th></tr>' + rows.join('');
+  $('cNow').innerHTML = 'Funding now (3-day mean, annualised %): ' + esc(JSON.stringify(j.funding_now_ann_pct_3d)) + '<br>Limits: ' + j.limits.map(esc).join(' ');
+  $('cZip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  $('cLog').href = '/api/replay/runs/' + encodeURIComponent(id) + '/log';
+  $('resBody').innerHTML = '<div class="meta">The funding carry result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+// ---------------------------------------------------------------- delisting short study and momentum study (P25)
+async function dLoadState() {
+  const j = await fetch('/api/replay/delist/state').then(r => r.json()).catch(() => null);
+  if (!j) { $('dState').textContent = 'could not read the state'; return; }
+  $('dState').textContent = j.data_ready ? ('cache: ' + j.events + ' notices, ' + j.with_candles + ' with candles. Running again only fetches what is new.') : (j.reason || 'no data yet');
+}
+
+async function startStudy(url, msgId, ask) {
+  if (!confirm(ask || 'Run this study? It downloads public Bybit history (no key, $0, resumable) and then simulates. A few minutes the first time.')) return;
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $(msgId).innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>'; return; }
+  $(msgId).textContent = 'started ' + j.run_id + ' (progress in the Progress block)'; currentRun = j.run_id; poll();
+}
+
+function renderDelist(id, j) {
+  $('resId').textContent = id + ' · delisting shorts';
+  $('dResult').style.display = 'block';
+  $('dVerdict').outerHTML = '<span id="dVerdict">' + vbadge(j.verdict) + '</span>';
+  $('dVerdictWhy').textContent = 'primary ' + j.primary + ' · ' + j.events.simulated + ' of ' + j.events.notices + ' notices simulated (skipped ' + JSON.stringify(j.events.skipped) + ')';
+  $('dNote').innerHTML = j.verdict_failed_conditions.length ? '<b>Not met:</b> ' + j.verdict_failed_conditions.map(esc).join('; ') : 'All pre-registered conditions met. A hypothesis for a small real-money test, not proof.';
+  const rows = [];
+  Object.keys(j.grid).forEach(k => ['hedged', 'raw'].forEach(b => { const s = j.grid[k][b]; if (!s.events) return;
+    rows.push('<tr' + (k === j.primary && b === 'hedged' ? ' style="outline:1px solid var(--green)"' : '') + '><td>' + esc(k) + '</td><td>' + b + '</td><td>' + s.events + '</td><td>' + s.mean_pct + '</td><td>' + s.median_pct + '</td><td>' + s.win_pct + '</td><td>' + esc(JSON.stringify(s.ci95_pct)) + '</td><td>' + s.worst_pct + '</td><td>' + fmt(s.excess_mean_pct) + '</td><td>' + fmt(s.percentile_vs_random) + '</td><td>' + fmt(s.first_half_mean_pct) + ' / ' + fmt(s.second_half_mean_pct) + '</td><td>' + fmt(s.top5_share_of_total) + '</td></tr>'); }));
+  $('dTable').innerHTML = '<tr><th>scenario</th><th>basis</th><th>events</th><th>mean %</th><th>median %</th><th>win %</th><th>95% CI</th><th>worst %</th><th>excess vs random %</th><th>percentile</th><th>1st / 2nd half %</th><th>top 5 share</th></tr>' + rows.join('');
+  $('dMore').innerHTML = 'By lead time (primary, hedged): ' + esc(JSON.stringify(j.by_lead_time)) + '<br>Limits: ' + j.limits.map(esc).join(' ');
+  $('dZip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  $('dLog').href = '/api/replay/runs/' + encodeURIComponent(id) + '/log';
+  $('resBody').innerHTML = '<div class="meta">The delisting result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+function renderMaker(id, j) {
+  $('resId').textContent = id + ' · maker fills';
+  $('kResult').style.display = 'block';
+  $('kVerdict').outerHTML = '<span id="kVerdict">' + vbadge(j.verdict) + '</span>';
+  const r = j.ranker, f = j.fade;
+  $('kVerdictWhy').textContent = r ? 'ranker primary: limit ' + (r.primary.delta * 100).toFixed(2) + '% better than the open, ' + r.primary.timeout_h + ' h to fill, then ' + r.primary.mode : 'ranker part not run';
+  $('kNote').innerHTML = (j.verdict_failed_conditions.length ? '<b>Not met:</b> ' + j.verdict_failed_conditions.map(esc).join('; ') : 'All pre-registered conditions met.') + (j.errors || []).map(e => '<br><b>Not run:</b> ' + esc(e)).join('');
+  if (r) {
+    const rows = Object.keys(r.baseline).map(k => { const b = r.baseline[k]; return '<tr><td>' + esc(k) + '</td><td>' + fmt(b.oos.apr_pct) + '</td><td>' + fmt(b.oos.sharpe) + '</td><td>' + fmt(b.oos.max_dd_pct) + '</td><td>' + fmt(b.locked.apr_pct) + '</td><td>-</td><td>-</td><td>-</td></tr>'; })
+      .concat(r.grid.map(g => { const prim = g.mode === r.primary.mode && g.delta === r.primary.delta && g.timeout_h === r.primary.timeout_h; return '<tr' + (prim ? ' style="outline:1px solid var(--green)"' : '') + '><td>' + g.mode + ' ' + (g.delta * 100).toFixed(2) + '% / ' + g.timeout_h + ' h' + (prim ? ' (primary)' : '') + '</td><td>' + fmt(g.oos.apr_pct) + '</td><td>' + fmt(g.oos.sharpe) + '</td><td>' + fmt(g.oos.max_dd_pct) + '</td><td>' + fmt(g.locked.apr_pct) + '</td><td>' + g.fill_rate + '</td><td>' + g.chased + '</td><td>' + g.skipped + '</td></tr>'; }));
+    $('kTable').innerHTML = '<tr><th>execution (ranker book)</th><th>OOS APR %</th><th>OOS Sharpe</th><th>OOS max DD %</th><th>locked APR %</th><th>fill rate</th><th>chased</th><th>skipped</th></tr>' + rows.join('');
+  } else { $('kTable').innerHTML = ''; }
+  if (f) {
+    $('kTable2').innerHTML = '<tr><th>Fade: limit above open</th><th>wait</th><th>fill rate</th><th>taker P&amp;L/trade if it would fill $</th><th>... if it would NOT fill $</th><th>net $ taker (all)</th><th>net $ skip unfilled</th><th>net $ chase unfilled</th></tr>' + f.rows.map(x => '<tr><td>' + (x.delta * 100).toFixed(2) + '%</td><td>' + x.timeout_min + ' min</td><td>' + fmt(x.fill_rate) + '</td><td>' + fmt(x.taker_mean_usd_filled) + '</td><td>' + fmt(x.taker_mean_usd_unfilled) + '</td><td>' + x.net_usd_taker_all + '</td><td>' + x.net_usd_skip + '</td><td>' + x.net_usd_chase + '</td></tr>').join('');
+  } else { $('kTable2').innerHTML = ''; }
+  $('kMore').innerHTML = 'Maker fee ' + j.maker_fee_pct + '%, taker fee ' + j.taker_fee_pct + '% + slippage ' + j.slippage_pct[0] + '% (stress ' + j.slippage_pct[1] + '%). If the trades that would NOT fill earn more than the ones that would, passive entry removes the winners. Limits: ' + j.limits.map(esc).join(' ');
+  $('kZip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  $('kLog').href = '/api/replay/runs/' + encodeURIComponent(id) + '/log';
+  $('resBody').innerHTML = '<div class="meta">The maker-fill result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+function renderGrid(id, j) {
+  $('resId').textContent = id + ' · ranker grid';
+  $('gResult').style.display = 'block';
+  $('gVerdict').outerHTML = '<span id="gVerdict">' + vbadge(j.verdict) + '</span>';
+  const c = j.counts;
+  $('gVerdictWhy').textContent = 'rank IC positive in ' + c.ic_positive + ' of ' + c.cells + ' cells · net APR positive in ' + c['apr_positive_0.10'] + ' (0.10% slippage) / ' + c['apr_positive_0.30'] + ' (0.30%) · out-of-sample from ' + j.window.lock_end;
+  $('gNote').innerHTML = (j.verdict_failed_conditions.length ? '<b>Not met:</b> ' + j.verdict_failed_conditions.map(esc).join('; ') + '<br>' : 'All pre-registered conditions met.<br>') + (j.warnings || []).map(w => '<b>Warning:</b> ' + esc(w)).join('<br>');
+  $('gTable').innerHTML = '<tr><th>universe</th><th>hold d</th><th>quintile</th><th>OOS APR % (0.10%)</th><th>OOS Sharpe</th><th>OOS max DD %</th><th>locked APR %</th><th>OOS APR % (0.30%)</th><th>turnover</th><th>OOS rank IC</th></tr>' + j.cells.map(r => {
+    const o = r['slip0.1'].oos, l = r['slip0.1'].locked, s = r['slip0.3'].oos;
+    return '<tr' + (r.primary ? ' style="outline:1px solid var(--green)"' : '') + '><td>' + r.universe + (r.primary ? ' (primary)' : '') + '</td><td>' + r.hold + '</td><td>' + r.quintile + '</td><td>' + fmt(o.apr_pct) + '</td><td>' + fmt(o.sharpe) + '</td><td>' + fmt(o.max_dd_pct) + '</td><td>' + fmt(l.apr_pct) + '</td><td>' + fmt(s.apr_pct) + '</td><td>' + fmt(r['slip0.1'].turnover) + '</td><td>' + fmt((r.ic_oos || {}).mean_ic) + '</td></tr>'; }).join('');
+  $('gMore').innerHTML = 'Limits: ' + j.limits.map(esc).join(' ');
+  $('gZip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  $('gLog').href = '/api/replay/runs/' + encodeURIComponent(id) + '/log';
+  $('resBody').innerHTML = '<div class="meta">The grid result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+function renderPremium(id, j) {
+  $('resId').textContent = id + ' · premium features';
+  $('pResult').style.display = 'block';
+  $('pVerdict').outerHTML = '<span id="pVerdict">' + vbadge(j.verdict) + '</span>';
+  $('pVerdictWhy').textContent = 'out-of-sample rank IC change ' + (j.ic_gain >= 0 ? '+' : '') + j.ic_gain + ' (needs +' + j.pass_thresholds.min_ic_gain + ') · premium coverage ' + j.coverage_pct + '% of the hours';
+  $('pNote').innerHTML = j.verdict_failed_conditions.length ? '<b>Not met:</b> ' + j.verdict_failed_conditions.map(esc).join('; ') : 'All pre-registered conditions met. A hypothesis for the ranker, not proof.';
+  $('pTable').innerHTML = '<tr><th>feature set</th><th>OOS rank IC</th><th>locked IC</th><th>OOS APR % (0.10%)</th><th>OOS Sharpe</th><th>OOS max DD %</th><th>OOS APR % (0.30%)</th><th>locked APR %</th></tr>' + Object.keys(j.results).map(k => {
+    const r = j.results[k], o = r['slip0.1'].oos, o3 = r['slip0.3'].oos;
+    return '<tr><td>' + esc(k) + '</td><td>' + fmt((r.ic_oos || {}).mean_ic) + ' ' + esc(JSON.stringify((r.ic_oos || {}).ci95 || '')) + '</td><td>' + fmt((r.ic_locked || {}).mean_ic) + '</td><td>' + fmt(o.apr_pct) + '</td><td>' + fmt(o.sharpe) + '</td><td>' + fmt(o.max_dd_pct) + '</td><td>' + fmt(o3.apr_pct) + '</td><td>' + fmt(r['slip0.1'].locked.apr_pct) + '</td></tr>'; }).join('');
+  $('pMore').innerHTML = 'Premium features\' share of the model\'s gain: ' + (j.premium_gain_share_pct || []).map(p => esc(p[0]) + ' ' + p[1] + '%').join(', ') + '<br>Limits: ' + j.limits.map(esc).join(' ');
+  $('pZip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  $('pLog').href = '/api/replay/runs/' + encodeURIComponent(id) + '/log';
+  $('resBody').innerHTML = '<div class="meta">The premium result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+function renderFadeExit(id, j) {
+  $('resId').textContent = id + ' · Fade exit study';
+  $('xResult').style.display = 'block';
+  $('xVerdict').outerHTML = '<span id="xVerdict">' + vbadge(j.verdict) + '</span>';
+  $('xVerdictWhy').textContent = 'candidate ' + j.candidate + ' vs live rules · deciding period from ' + j.split + ' · live stop-loss fills gap ' + JSON.stringify(j.live_stop_gaps_pct) + ' % beyond the stop';
+  $('xNote').innerHTML = j.verdict_failed_conditions.length ? '<b>Not met:</b> ' + j.verdict_failed_conditions.map(esc).join('; ') : 'All pre-registered conditions met. A hypothesis for a live dry-run, not a change of a live setting.';
+  const rows = [];
+  Object.keys(j.variants).forEach(k => { const v = j.variants[k], s = v.slip0_3 || v['slip0.3'], o = s.oos, d = v.oos_diff_vs_live;
+    rows.push('<tr' + (k === j.candidate ? ' style="outline:1px solid var(--green)"' : '') + '><td>' + esc(k) + '</td><td>' + v.stoploss_pct + '</td><td>' + v.cooldown_h + '</td><td>' + s.all.n + '</td><td>' + s.all.net_usd + '</td><td>' + s.locked.net_usd + '</td><td>' + o.n + '</td><td>' + o.net_usd + '</td><td>' + fmt(o.mean_trade_pct) + '</td><td>' + o.stops + '</td><td>' + o.max_dd_pct + '</td><td>' + fmt(d.total_usd) + '</td><td>' + esc(JSON.stringify(d.ci95_usd_per_day)) + '</td></tr>'); });
+  $('xTable').innerHTML = '<tr><th>variant</th><th>stop %</th><th>cooldown h</th><th>n (all)</th><th>net $ (all)</th><th>net $ (looking)</th><th>n (deciding)</th><th>net $ (deciding)</th><th>mean %</th><th>stops</th><th>max DD %</th><th>vs live $ (deciding)</th><th>95% CI $/day</th></tr>' + rows.join('');
+  $('xMore').innerHTML = 'Slippage 0.30% per side; the 0.50% stress line is in the downloaded report. Limits: ' + j.limits.map(esc).join(' ');
+  $('xZip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  $('xLog').href = '/api/replay/runs/' + encodeURIComponent(id) + '/log';
+  $('resBody').innerHTML = '<div class="meta">The Fade exit result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+function renderLgbm(id, j, p) {
+  p = p || 'l';
+  $('resId').textContent = id + (p === 'h' ? ' · LightGBM v2' : ' · LightGBM');
+  $(p + 'Result').style.display = 'block';
+  $(p + 'Verdict').outerHTML = '<span id="' + p + 'Verdict">' + vbadge(j.verdict) + '</span>';
+  $(p + 'VerdictWhy').textContent = 'window ' + j.window.first_prediction + ' … ' + j.window.end + ' (out-of-sample from ' + j.window.lock_end + ') · placebo percentile ' + j.placebo.primary_oos_percentile + ' · rank IC ' + fmt((j.rank_ic.oos || {}).mean_ic);
+  $(p + 'Note').innerHTML = j.verdict_failed_conditions.length ? '<b>Not met:</b> ' + j.verdict_failed_conditions.map(esc).join('; ') : 'All pre-registered conditions met. A hypothesis for a small test, not proof.';
+  const rows = [];
+  Object.keys(j.results).forEach(k => ['all', 'locked', 'oos'].forEach(per => { const s = j.results[k][per]; if (!s || (s.days || 0) < 30) return;
+    rows.push('<tr' + (k === j.primary && per === 'oos' ? ' style="outline:1px solid var(--green)"' : '') + '><td>' + esc(k) + '</td><td>' + per + '</td><td>' + s.days + '</td><td>' + s.net_pct_of_sleeve + '</td><td>' + s.apr_pct + '</td><td>' + fmt(s.sharpe) + '</td><td>' + s.max_dd_pct + '</td><td>' + esc(JSON.stringify(s.ci95_daily_apr_pct)) + '</td><td>' + s.win_week_pct + '</td></tr>'); }));
+  $(p + 'Table').innerHTML = '<tr><th>config</th><th>period</th><th>days</th><th>net % of sleeve</th><th>APR %</th><th>Sharpe</th><th>max DD %</th><th>95% CI of APR %</th><th>winning weeks %</th></tr>' + rows.join('');
+  $(p + 'More').innerHTML = 'Rank IC: ' + esc(JSON.stringify(j.rank_ic)) + '<br>Placebo (shuffled labels, out-of-sample APR p5 / p50 / p95): ' + esc(JSON.stringify(j.placebo.oos_apr_pct_p5_p50_p95)) + '<br>Top features: ' + esc(JSON.stringify(j.feature_importance_top)) + '<br>Benchmarks: ' + esc(JSON.stringify(j.benchmarks)) + '<br>Limits: ' + j.limits.map(esc).join(' ');
+  $(p + 'Zip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  $(p + 'Log').href = '/api/replay/runs/' + encodeURIComponent(id) + '/log';
+  $('resBody').innerHTML = '<div class="meta">The LightGBM result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+function renderMomentum(id, j) {
+  $('resId').textContent = id + ' · momentum';
+  $('mResult').style.display = 'block';
+  $('mVerdict').outerHTML = '<span id="mVerdict">' + vbadge(j.verdict) + '</span>';
+  $('mVerdictWhy').textContent = 'primary ' + j.primary + ' · window ' + j.window.start + ' … ' + j.window.end + ' (out-of-sample from ' + j.window.lock_end + ') · placebo percentile ' + j.placebo.primary_oos_percentile;
+  $('mNote').innerHTML = j.verdict_failed_conditions.length ? '<b>Not met:</b> ' + j.verdict_failed_conditions.map(esc).join('; ') : 'All pre-registered conditions met. A hypothesis for a small test, not proof.';
+  const rows = [];
+  Object.keys(j.results).forEach(k => ['all', 'locked', 'oos'].forEach(per => { const s = j.results[k][per]; if (!s || (s.days || 0) < 30) return;
+    rows.push('<tr' + (k === j.primary && per === 'oos' ? ' style="outline:1px solid var(--green)"' : '') + '><td>' + esc(k) + '</td><td>' + per + '</td><td>' + s.days + '</td><td>' + s.net_pct_of_sleeve + '</td><td>' + s.apr_pct + '</td><td>' + fmt(s.sharpe) + '</td><td>' + s.max_dd_pct + '</td><td>' + esc(JSON.stringify(s.ci95_daily_apr_pct)) + '</td><td>' + s.win_week_pct + '</td></tr>'); }));
+  $('mTable').innerHTML = '<tr><th>config</th><th>period</th><th>days</th><th>net % of sleeve</th><th>APR %</th><th>Sharpe</th><th>max DD %</th><th>95% CI of APR %</th><th>winning weeks %</th></tr>' + rows.join('');
+  $('mMore').innerHTML = 'Placebo (random coins, out-of-sample APR p5 / p50 / p95): ' + esc(JSON.stringify(j.placebo.oos_apr_pct_p5_p50_p95)) + '<br>Benchmarks: ' + esc(JSON.stringify(j.benchmarks)) + '<br>Limits: ' + j.limits.map(esc).join(' ');
+  $('mZip').href = '/api/replay/runs/' + encodeURIComponent(id) + '/download';
+  $('mLog').href = '/api/replay/runs/' + encodeURIComponent(id) + '/log';
+  $('resBody').innerHTML = '<div class="meta">The momentum result is shown in its card on the Studies tab.</div>';
+  $('chart').style.display = 'none';
+}
+
+async function lfCopy() {
+  const t = $('lfLine').textContent;
+  try { await navigator.clipboard.writeText(t); $('lfCopyMsg').textContent = 'copied'; }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($('lfLine')); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); $('lfCopyMsg').textContent = 'selected: press Ctrl+C'; }
+}
+
+// ---------------------------------------------------------------- short bots card (P22-A)
+let sLast = null;
+function sParams() {
+  const bots = Array.from(document.querySelectorAll('.sBot:checked')).map(x => x.value);
+  const veto = $('sVeto').checked;
+  const p = { bots, modes: veto ? ['named'] : [], rule_only: !veto, add_rule: true, days: +$('sDays').value, pairs: +$('sPairs').value, every_n: +$('sEvery').value, minute_prices: true, funding: true,
+    provider: ($('provider') && $('provider').value) || 'deepseek', max_usd: +($('maxUsd').value || 3), max_calls: +($('maxCalls').value || 200000) };
+  if ($('sEnd').value) p.end = $('sEnd').value + 'T00:00:00+00:00';
+  return p;
+}
+
+async function sEstimate() {
+  sLast = null; $('sStart').disabled = true;
+  const p = sParams();
+  if (!p.bots.length) { $('sEstimate').innerHTML = '<span style="color:var(--red)">pick at least one bot</span>'; return; }
+  $('sEstimate').textContent = 'counting candidates on the real candles (no LLM call)…';
+  const r = await fetch('/api/replay/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('sEstimate').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>'; return; }
+  sLast = { p, est: j };
+  const cands = j.candidates ? Object.keys(j.candidates).map(b => esc(b) + ': <b>' + j.candidates[b] + '</b> candidates').join(' · ') : '';
+  $('sEstimate').innerHTML = (p.modes.length ? '<b>' + j.calls + '</b> LLM calls (candidates only' + (cands ? ': ' + cands : '') + ') · ~' + esc(j.avg_input_tokens) + ' input tokens · <b>$' + esc(j.usd) + '</b> · ~' + Math.round(j.seconds / 60) + ' min'
+    : '<b>0</b> LLM calls, $0: rule only (candidates) and random entries') + (j.within_limits ? '' : ' <b style="color:var(--red)">— over the limit</b>') + (j.prices_known ? '' : ' <b style="color:var(--red)">— REPLAY_PRICE_*_PER_M are not set</b>') +
+    (j.model ? '<br>model: <b>' + esc(j.model) + '</b>' : '') + '<br><span class="meta">' + esc(j.price_note) + '</span>';
+  $('sStart').disabled = !j.within_limits || !j.prices_known;
+  $('sStart').textContent = p.modes.length ? 'Start (up to $' + j.usd + ')' : 'Start ($0)';
+}
+
+async function sStart() {
+  if (!sLast) return;
+  const e = sLast.est;
+  if (!confirm((sLast.p.modes.length ? 'Start the short-bot replay with the model\'s veto? Estimate: ' + e.calls + ' LLM calls, $' + e.usd + '.' : 'Start the short-bot replay, rule only? The model is not called, $0.') + ' The bots are not started live.')) return;
+  const r = await fetch('/api/replay/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sLast.p) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('sMsg').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>'; return; }
+  $('sMsg').textContent = 'started ' + j.run_id + ' (progress in the Progress block, the result appears in Results)'; currentRun = j.run_id; poll();
+}
+
+function renderCandidates(j) {
+  const bots = Object.keys(j.bots || {}).filter(b => /_v2$/.test(b));
+  return bots.map(b => {
+    const n = (j.bots[b].named || {}).candidates, r = (j.bots[b].rule || {}).candidates;
+    let h = '<h3>' + esc(b) + '</h3>';
+    if (n) {
+      h += '<div class="meta">candidates ' + n.n_candidates + ' of ' + n.n_decisions + ' decisions · votes ' + esc(JSON.stringify(n.votes)) + ' · vetoed ' + esc(n.share_vetoed) + '</div><div style="margin:4px 0"><b>' + esc(n.veto_adds) + '</b></div>' +
+        '<div class="tw"><table class="hist"><tr><th>horizon</th><th>all candidates (bare rule), short return %</th><th>confirm: n, mean %, 95% CI</th><th>veto: n, mean %, 95% CI</th><th>confirm − veto, pp [95% CI]</th></tr>' +
+        ['h1', 'h4', 'h24'].map(k => { const f = n.forward_short_return_pct[k] || {}, c = f.confirmed || {}, v = f.vetoed || {}, a = f['all_candidates (bare rule)'] || {}, vv = n.veto_value[k] || {};
+          return '<tr><td>' + k + '</td><td>' + fmt(a.mean_pct) + ' (n ' + a.n + ')</td><td>' + c.n + ', ' + fmt(c.mean_pct) + ', ' + esc(JSON.stringify(c.ci95_pct)) + '</td><td>' + v.n + ', ' + fmt(v.mean_pct) + ', ' + esc(JSON.stringify(v.ci95_pct)) + '</td><td>' + fmt(vv.confirmed_minus_vetoed_pp) + ' ' + esc(JSON.stringify(vv.ci95_pp)) + '</td></tr>'; }).join('') + '</table></div>' +
+        '<div class="meta">' + esc(n.rule) + '</div>';
+    } else if (r) {
+      h += '<div class="meta">rule only: ' + r.n_candidates + ' candidates; short return over all candidates: ' + ['h1', 'h4', 'h24'].map(k => k + ' ' + fmt(((r.forward_short_return_pct[k] || {})['all_candidates (bare rule)'] || {}).mean_pct) + '%').join(', ') + '</div>';
+    }
+    return h;
+  }).join('');
+}
+
+function botRows(j, bots) {
+  let rows = '';
+  bots.forEach(bot => {
+    ['named', 'anonymized', 'rule'].forEach(mode => {
+      const e = j.bots[bot][mode];
+      if (!e) return;
+      const dv = e.divergence_from_live || {};
+      const flags = (dv.flags || []).length ? ' <span style="color:var(--amber)">⚑ ' + esc(dv.flags.join(', ')) + '</span>' : '';
+      rows += '<tr><td>' + esc(bot) + (e.universe_mismatch ? ' <span class="badge" style="color:var(--amber)">different universe</span>' : '') + '</td><td>' + (mode === 'rule' ? 'rule (no LLM)' : mode) + '</td><td>' + esc(e.model) + '</td><td>' + e.n_decisions + '</td><td>' + e.n_trades + '</td><td>' + fmt(e.win_pct) + '</td><td>' + fmt(e.mean_trade_pct) + '</td><td>' + esc(JSON.stringify(e.ci95_pct)) +
+        '</td><td>' + e.fees_usd + '</td><td>' + e.net_usd + '</td><td>' + e.max_drawdown_pct + '</td><td>' + fmt(e.vs_random_percentile) + '</td><td><span class="badge">' + esc(e.status) + '</span> <span class="badge">replay ≠ proof</span><br><span class="meta">signals: ' + esc(e.signal_status) + '</span></td><td class="meta">' +
+        (dv.available ? ('live ' + dv.live_n_trades + ' / replay ' + dv.replay_n_trades + ' trades, mean ' + fmt(dv.live_mean_trade_pct) + ' / ' + fmt(dv.replay_mean_trade_pct) + ' % — ' + esc(dv.verdict) + flags) : 'no live reference') + '</td></tr>';
+    });
+    if (j.bots[bot].leak_suspect) rows += '<tr><td>' + esc(bot) + '</td><td colspan="13" style="color:var(--red)"><b>Suspected leak: a gain only in named mode — the result is invalid</b></td></tr>';
+    const lr = (j.llm_vs_rule || {})[bot];
+    if (lr) rows += '<tr><td>' + esc(bot) + '</td><td colspan="13" class="meta">LLM versus rule: named ' + lr.named_mean_pct + ' % vs rule ' + lr.rule_mean_pct + ' % (Δ ' + lr.diff_pp + ' pp) — ' + (lr.llm_ci_above_rule_mean ? 'the LLM CI lower bound is above the rule mean' : 'the LLM is not above the rule with confidence') + '</td></tr>';
+  });
+  return rows;
+}
+
+const RES_HEAD = '<tr><th>bot</th><th>mode</th><th>model</th><th>decisions</th><th>trades</th><th>win %</th><th>mean / trade %</th><th>95% CI</th><th>fees $</th><th>net $</th><th>max drawdown %</th><th>vs random (percentile)</th><th>status</th><th>live reference</th></tr>';
+
+function renderVariants(id, j) {
+  $('resId').textContent = id + ' · exit variants';
+  const vlist = Object.keys(j.variants).map(n => '<li><b>' + esc(n) + '</b>: ' + esc(Object.keys(j.variants[n].overrides).length ? JSON.stringify(j.variants[n].overrides) : 'strategy parameters') + '</li>').join('');
+  const main = j.comparison.filter(r => !r.universe_mismatch), side = j.comparison.filter(r => r.universe_mismatch);
+  const tr = r => '<tr><td>' + esc(r.bot) + '</td><td>' + esc(r.mode) + '</td><td>' + esc(r.variant) + '</td><td>' + r.n_trades + '</td><td>' + fmt(r.mean_trade_pct) + '</td><td>' + esc(JSON.stringify(r.ci95_pct)) + '</td><td>' + r.net_usd + '</td><td>' + r.max_drawdown_pct + '</td><td>' + fmt(r.vs_random_percentile) + '</td><td>' + esc(r.status) + '</td><td class="meta">' + esc(JSON.stringify(r.exit_reasons)) + '</td></tr>';
+  const head = '<tr><th>bot</th><th>mode</th><th>variant</th><th>trades</th><th>mean / trade %</th><th>95% CI</th><th>net $</th><th>max drawdown %</th><th>vs random</th><th>status</th><th>exits</th></tr>';
+  $('resBody').innerHTML = '<div class="rbanner">' + esc(j.note) + '</div><div class="meta">Model calls: ' + j.llm.calls + ' (cache ' + j.llm.cache_hits + '), $' + j.llm.usd + ' · source: ' + esc(j.source_run) + '</div><ul class="rules meta">' + vlist + '</ul>' +
+    '<div class="tw"><table class="hist">' + head + main.map(tr).join('') + '</table></div>' +
+    (side.length ? '<h3>Different universe: mechanics check only (outside the summary)</h3><div class="tw"><table class="hist">' + head + side.map(tr).join('') + '</table></div>' : '') +
+    '<ul class="rules meta">' + j.limits_of_replay.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul><div class="inline"><a href="/api/replay/runs/' + encodeURIComponent(id) + '/download">ZIP</a><a href="/api/replay/runs/' + encodeURIComponent(id) + '/log">log</a></div>';
+  $('chart').style.display = 'none';
+}
+
+async function openRun(id) {
+  const r = await fetch('/api/replay/runs/' + encodeURIComponent(id));
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('resBody').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || r.status) + '</span>'; return; }
+  if (j.type === 'calibration') { $('resId').textContent = id; $('resBody').innerHTML = '<div class="meta">This is a calibration run. Its report is on <a href="/calibration#reports">Training &amp; calibration</a>.</div>'; return; }
+  location.hash = (['listing_fade_study', 'carry_study', 'delist_study', 'momentum_study', 'lgbm_study', 'lgbm_hourly_study', 'fade_exit_study', 'lgbm_grid_study', 'lgbm_premium_study', 'maker_study'].includes(j.type)) ? '#studies' : '#results';
+  if (j.type === 'exit_variants') { renderVariants(id, j); return; }
+  if (j.type === 'listing_fade_study') { renderLf(id, j); return; }
+  if (j.type === 'carry_study') { renderCarry(id, j); return; }
+  if (j.type === 'delist_study') { renderDelist(id, j); return; }
+  if (j.type === 'momentum_study') { renderMomentum(id, j); return; }
+  if (j.type === 'lgbm_study') { renderLgbm(id, j); return; }
+  if (j.type === 'fade_exit_study') { renderFadeExit(id, j); return; }
+  if (j.type === 'lgbm_grid_study') { renderGrid(id, j); return; }
+  if (j.type === 'maker_study') { renderMaker(id, j); return; }
+  if (j.type === 'lgbm_premium_study') { renderPremium(id, j); return; }
+  if (j.type === 'lgbm_hourly_study') { renderLgbm(id, j, 'h'); return; }
+  $('resId').textContent = id;
+  const side = j.mechanics_check_only || [];
+  const mainBots = Object.keys(j.bots).filter(b => !side.includes(b)), sideBots = Object.keys(j.bots).filter(b => side.includes(b));
+  const btc = j.baselines && j.baselines.btc_buy_and_hold;
+  $('resBody').innerHTML = '<div class="meta">model: <b>' + esc(j.model) + '</b> (each row has its own model; results of different models are not comparable) · window ' + esc(j.params.start) + ' … ' + esc(j.params.end) + ' · step ' + j.params.every_n + ' · fee ' + j.params.fee_pct + '% + slippage ' + j.params.slippage_pct + '% · LLM: ' + j.llm.calls + ' calls, cache ' + j.llm.cache_hits + ', $' + j.llm.usd + '</div>' +
+    '<div class="tw"><table class="hist">' + RES_HEAD + botRows(j, mainBots) + '</table></div>' +
+    (sideBots.length ? '<h3>Different universe: mechanics check only (outside the summary and conclusions)</h3><div class="meta">The live Moonshot trades new listings, the replay liquid coins.</div><div class="tw"><table class="hist">' + RES_HEAD + botRows(j, sideBots) + '</table></div>' : '') +
+    renderCandidates(j) +
+    '<div class="meta" style="margin-top:8px">BTC buy&amp;hold over the window: ' + (btc ? btc.return_pct + '%' : 'n/a') + ' · controls: ' + esc(j.baselines.controls) + '</div>' +
+    '<div class="meta">No-LLM rules (formulas from the strategies): ' + Object.keys(j.rule_formulas || {}).map(b => esc(b) + ': <code>' + esc((j.rule_formulas[b] || []).join(' ')) + '</code>').join(' · ') + '</div>' +
+    '<div class="meta">Pairs: ' + esc(JSON.stringify(j.universe)) + '</div><ul class="rules meta">' + j.limits_of_replay.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' +
+    '<div class="inline"><a href="/api/replay/runs/' + encodeURIComponent(id) + '/download">ZIP</a><a href="/api/replay/runs/' + encodeURIComponent(id) + '/log">log</a></div>';
+  drawChart(j);
+}
+
+function drawChart(j) {
+  const cv = $('chart'); const ctx = cv.getContext('2d');
+  const series = [];
+  Object.keys(j.equity_curves || {}).forEach(bot => Object.keys(j.equity_curves[bot]).forEach(mode => series.push({ name: bot + '/' + mode, pts: j.equity_curves[bot][mode], dash: mode === 'anonymized' })));
+  const btc = j.baselines && j.baselines.btc_buy_and_hold;
+  if (btc) series.push({ name: 'BTC hold', pts: btc.curve, btc: true });
+  if (!series.length) { cv.style.display = 'none'; return; }
+  cv.style.display = 'block'; ctx.clearRect(0, 0, cv.width, cv.height);
+  const all = series.flatMap(s => s.pts.map(p => p[1])); const lo = Math.min(...all), hi = Math.max(...all);
+  const t = p => new Date(p[0]).getTime(); const ts = series.flatMap(s => s.pts.map(t)); const t0 = Math.min(...ts), t1 = Math.max(...ts);
+  const X = p => 40 + (t(p) - t0) / (t1 - t0 || 1) * (cv.width - 60), Y = v => cv.height - 20 - (v - lo) / (hi - lo || 1) * (cv.height - 40);
+  ctx.strokeStyle = '#223029'; ctx.fillStyle = '#8A968D'; ctx.font = '11px monospace';
+  [lo, (lo + hi) / 2, hi].forEach(v => { ctx.beginPath(); ctx.moveTo(40, Y(v)); ctx.lineTo(cv.width - 10, Y(v)); ctx.stroke(); ctx.fillText(v.toFixed(3), 2, Y(v) + 3); });
+  const colors = ['#7FA37A', '#D9A441', '#7aa2f7', '#C4635A', '#b48ead', '#88c0d0', '#ebcb8b', '#a3be8c', '#d08770', '#81a1c1'];
+  series.forEach((s, i) => { ctx.strokeStyle = s.btc ? '#EDEAE0' : colors[i % colors.length]; ctx.lineWidth = s.btc ? 2 : 1.2; ctx.setLineDash(s.dash ? [4, 3] : []); ctx.beginPath();
+    s.pts.forEach((p, k) => { const x = X(p), y = Y(p[1]); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); });
+  ctx.setLineDash([]); let lx = 44; series.forEach((s, i) => { ctx.fillStyle = s.btc ? '#EDEAE0' : colors[i % colors.length]; ctx.fillText(s.name, lx, 12); lx += s.name.length * 7 + 14; });
+}
+
+async function loadRuns() {
+  const j = await fetch('/api/replay/runs').then(r => r.json()).catch(() => ({ runs: [] }));
+  const runs = j.runs.filter(r => r.type !== 'calibration');
+  if (!runs.length) { $('runsBody').innerHTML = '<span class="meta">no runs yet</span>'; return; }
+  $('runsBody').innerHTML = '<div class="tw"><table class="hist"><tr><th>run</th><th>bots</th><th>window</th><th>step</th><th>modes</th><th>calls</th><th>$</th><th></th></tr>' + runs.map(r => '<tr><td>' + esc(r.run_id) + (r.type === 'exit_variants' ? ' <span class="badge">exit variants</span>' : r.type === 'listing_fade_study' ? ' <span class="badge">Listing Fade</span>' : r.type === 'carry_study' ? ' <span class="badge">carry</span>' : r.type === 'delist_study' ? ' <span class="badge">delisting</span>' : r.type === 'momentum_study' ? ' <span class="badge">momentum</span>' : r.type === 'lgbm_study' ? ' <span class="badge">LightGBM</span>' : r.type === 'lgbm_hourly_study' ? ' <span class="badge">LightGBM v2</span>' : r.type === 'fade_exit_study' ? ' <span class="badge">Fade exits</span>' : r.type === 'lgbm_grid_study' ? ' <span class="badge">ranker grid</span>' : r.type === 'lgbm_premium_study' ? ' <span class="badge">premium</span>' : r.type === 'maker_study' ? ' <span class="badge">maker fills</span>' : '') + '</td><td>' + esc((r.params.bots || []).join(', ')) + '</td><td>' +
+    esc((r.params.start || '').slice(0, 10)) + ' … ' + esc((r.params.end || '').slice(0, 10)) + '</td><td>' + esc(r.params.every_n || '-') + '</td><td>' + esc((r.params.modes || []).join('+') || '-') + '</td><td>' + fmt(r.calls) + '</td><td>' + fmt(r.usd) + '</td><td>' +
+    (r.has_report ? '<a href="#" data-open="' + esc(r.run_id) + '">report</a> · <a href="/api/replay/runs/' + encodeURIComponent(r.run_id) + '/download">ZIP</a> · <a href="/api/replay/runs/' + encodeURIComponent(r.run_id) + '/log">log</a>' : '<span class="meta">no report</span> · <a href="/api/replay/runs/' + encodeURIComponent(r.run_id) + '/log">log</a>') + '</td></tr>').join('') + '</table></div>';
+  document.querySelectorAll('[data-open]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); openRun(a.getAttribute('data-open')); }));
+}
+
+$('frozenOn').addEventListener('change', () => { $('frozenForm').style.display = $('frozenOn').checked ? 'block' : 'none'; invalidateEstimate(); });
+document.querySelectorAll('.varBox').forEach(b => b.addEventListener('change', () => { $('customVar').style.display = document.querySelector('.varBox[value=custom]').checked ? 'grid' : 'none'; invalidateEstimate(); }));
+['provider', 'addRule', 'minutePrices', 'frozenFrom'].forEach(id => $(id).addEventListener('change', invalidateEstimate));
+$('lfFetch').addEventListener('click', lfDoFetch);
+$('cRun').addEventListener('click', cRun);
+$('dRun').addEventListener('click', () => startStudy('/api/replay/delist/study', 'dMsg'));
+$('mRun').addEventListener('click', () => startStudy('/api/replay/momentum/study', 'mMsg'));
+$('lRun').addEventListener('click', () => startStudy('/api/replay/lgbm/study', 'lMsg'));
+$('hRun').addEventListener('click', () => startStudy('/api/replay/lgbm-hourly/study', 'hMsg'));
+$('kRun').addEventListener('click', () => startStudy('/api/replay/maker/study', 'kMsg', 'Run the maker-fill study? It uses the caches already on the server (the LightGBM v2 study and, for part 2, the Listing Fade data; no download, $0) and takes about 15 minutes of CPU.'));
+$('gRun').addEventListener('click', () => startStudy('/api/replay/lgbm-grid/study', 'gMsg', 'Run the robustness grid? It uses the Binance cache already on the server (no download, $0) and takes about 7 minutes of CPU.'));
+$('pRun').addEventListener('click', () => startStudy('/api/replay/lgbm-premium/study', 'pMsg', 'Run the premium study? It downloads about 15,000 small public files from the Binance archive (no key, $0, resumable, about 20 minutes) and then about 5 minutes of CPU.'));
+$('xRun').addEventListener('click', () => startStudy('/api/replay/fade-exit/study', 'xMsg', 'Run the exit study? It uses the Listing Fade data already on the server (no download, $0) and takes a few minutes. It changes nothing live.'));
+$('lfRun').addEventListener('click', lfDoRun);
+$('lfCopy').addEventListener('click', lfCopy);
+$('sEstBtn').addEventListener('click', sEstimate);
+$('sStart').addEventListener('click', sStart);
+['sDays', 'sPairs', 'sEvery', 'sEnd', 'sVeto'].forEach(id => $(id).addEventListener('change', () => { sLast = null; $('sStart').disabled = true; }));
+document.querySelectorAll('.sBot').forEach(b => b.addEventListener('change', () => { sLast = null; $('sStart').disabled = true; }));
+$('btnEstimate').addEventListener('click', doEstimate);
+$('btnStart').addEventListener('click', doStart);
+$('btnStop').addEventListener('click', doStop);
+$('btnPilot').addEventListener('click', pilot);
+['days', 'pairs', 'everyN', 'maxUsd', 'maxCalls', 'endDate', 'mNamed', 'mAnon'].forEach(id => $(id).addEventListener('change', invalidateEstimate));
+document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('botBox')) invalidateEstimate(); });
+showTab();
+loadConfig().then(() => { poll(); loadRuns(); lfLoadState(); cLoadState(); dLoadState(); });
+</script>
+</body>
+</html>

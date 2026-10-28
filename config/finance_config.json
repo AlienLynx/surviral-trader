@@ -1,0 +1,10 @@
+{
+  "start": 1600,
+  "target": 5000,
+  "months": 4,
+  "survival_monthly": 60,
+  "ramp_months": 4,
+  "take_pct": 50,
+  "risk_pct": 50,
+  "engine_enabled": false
+}

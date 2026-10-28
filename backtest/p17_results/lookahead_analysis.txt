@@ -1,0 +1,10 @@
+2026-09-29 18:16:10,224 - freqtrade.optimize.analysis.lookahead_helpers - INFO - Bias test of TrendV2Strategy.py started.
+2026-09-29 18:16:17,430 - freqtrade.loggers.set_log_levels - INFO - Reducing verbosity for bias tester.
+2026-09-29 18:16:22,456 - freqtrade.optimize.analysis.lookahead - INFO - TrendV2Strategy: no bias detected
+2026-09-29 18:16:22,457 - freqtrade.optimize.analysis.lookahead_helpers - INFO - Checking look ahead bias via backtests of TrendV2Strategy.py took 12 seconds.
++----------------------------------------------------------------------------------------------------------------------------------+
+|           filename |        strategy | has_bias | total_signals | biased_entry_signals | biased_exit_signals | biased_indicators |
+|--------------------+-----------------+----------+---------------+----------------------+---------------------+-------------------|
+| TrendV2Strategy.py | TrendV2Strategy |       No |            20 |                    0 |                   0 |                   |
++----------------------------------------------------------------------------------------------------------------------------------+
+lookahead exit=0

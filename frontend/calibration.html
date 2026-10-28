@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Training &amp; calibration - Survival Agent</title>
+<link rel="stylesheet" href="/assets/ui.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="shell"></div>
+
+  <nav class="tabs" id="tabs">
+    <a href="#live" data-tab="live">1 · Live reference</a>
+    <a href="#calibrate" data-tab="calibrate">2 · Calibration</a>
+    <a href="#kronos" data-tab="kronos">3 · Kronos signal</a>
+    <a href="#reports" data-tab="reports">Reports &amp; logs</a>
+  </nav>
+
+  <section id="banner0">
+    <h2>What this page is</h2>
+    <p class="lead">Training and calibration of the research tools, separate from the tests on <a href="/replay">Replay</a>. Everything here costs <b>$0</b>: no LLM is called. Everything is written only under <code>/data/replay/</code>; live bots, the ledger and the allocator are never touched.</p>
+    <ul class="rules meta">
+      <li><b>Live reference:</b> one read of the live bots' trades and decision logs, stored as a copy. The other steps work only on that copy.</li>
+      <li><b>Calibration:</b> feeds the simulator the live bots' <i>real decisions</i> instead of an LLM and compares the trades 1:1, which separates simulator error from model error.</li>
+      <li><b>Kronos signal:</b> historical Kronos forecasts and a pre-registered evaluation of whether they carry any edge.</li>
+    </ul>
+    <div class="warn">The live reference and calibration make no claim about edge. The Kronos verdict is computed by code against thresholds fixed in advance and is shown as one badge: <span class="vb vb-edge">edge candidate</span> <span class="vb vb-unp">unproven</span> <span class="vb vb-no">no edge</span> <span class="vb vb-ins">insufficient n</span>.</div>
+  </section>
+
+  <!-- progress and log are visible on every step -->
+  <section id="progress">
+    <h2>Progress <span class="badge" id="phaseBadge">idle</span></h2>
+    <div class="bar"><div id="barFill"></div></div>
+    <div id="counters" class="tiles" style="margin-top:10px"></div>
+    <div class="inline" style="margin:8px 0"><button id="btnStop" type="button" disabled>Stop</button><span id="progMsg" class="meta"></span><a id="logLink" href="#" style="display:none">Download this run's log</a></div>
+    <pre id="logBox" class="logbox" style="max-height:200px">log is empty</pre>
+  </section>
+
+  <!-- ===================== 1 LIVE ===================== -->
+  <div class="tab" id="tab-live">
+    <section id="liveref">
+      <h2>1 · Live reference</h2>
+      <p class="lead">The button reads the live bots' trades (REST) and decision logs <b>once</b>, with the same code as the export centre, and stores a copy (<code>live_reference.json</code> and <code>live_snapshot.json</code>). A bot that is unreachable is marked and the previous file is kept.</p>
+      <div class="inline"><label>from date <input type="date" id="refFrom" value="2026-09-21"></label><button id="btnRef" type="button">Refresh live reference</button><span id="refMsg" class="meta"></span></div>
+      <div id="refBody" class="meta" style="margin-top:8px"></div>
+      <div class="inline" style="margin-top:10px"><a href="/api/downloads/file/replay/live_reference.json">Download live_reference.json</a><a href="/api/downloads/file/replay/live_snapshot.json">Download live_snapshot.json</a></div>
+    </section>
+  </div>
+
+  <!-- ===================== 2 CALIBRATION ===================== -->
+  <div class="tab" id="tab-calibrate">
+    <section id="calibration">
+      <h2>2 · Calibration (no LLM, $0)</h2>
+      <p class="lead">&ldquo;Before&rdquo; is the P21 mechanics, &ldquo;after&rdquo; is the mechanics of the live Freqtrade cycle (decisions &rarr; exits &rarr; entries, entry delay, stake formula, restarts). The report shows what each fix is worth and why live and replay still differ.</p>
+      <div id="calCover" class="meta">decision coverage: loading…</div>
+      <div class="inline" style="margin-top:10px"><label>window from <input type="date" id="calFrom"></label><label>to <input type="date" id="calTo"></label><span class="meta">(empty = the whole period that has decisions)</span></div>
+      <div id="calBots" style="margin-top:6px"></div>
+      <div class="inline" style="margin-top:10px"><button id="btnCal" type="button">Run calibration (no LLM, $0)</button><span id="calMsg" class="meta"></span></div>
+    </section>
+    <section id="calresult">
+      <h2>Latest calibration report <span class="meta" id="resId"></span></h2>
+      <div id="resBody" class="meta">Open a report from the Reports &amp; logs tab, or wait for a run to finish.</div>
+    </section>
+  </div>
+
+  <!-- ===================== 3 KRONOS ===================== -->
+  <div class="tab" id="tab-kronos">
+    <section id="kCard">
+      <h2>3 · Kronos as a measured signal (CPU only, no LLM, $0)</h2>
+      <p class="lead">The container <code>kronos-replay</code> runs Kronos-small (24.7M, CPU, nice 10, idle without a job, weights baked into the image). For every hour of the window and every pair the model sees only candles before t0&minus;1h. The signal is fixed in advance: |expected 4h return| &ge; 0.5% &rarr; up / down, otherwise neutral. The verdict is computed by code: net 4h excess over the mean of all pairs in the same hour, minus fees and 0.3% slippage, day-cluster bootstrap, n &ge; 200 per direction, CI lower bound &gt; 0 and a positive result in both halves of the window.</p>
+      <div id="kState" class="meta">loading…</div>
+      <h3>Benchmark</h3>
+      <div class="inline"><button id="kBench" type="button">Benchmark (12 forecasts, 1 pair)</button><span class="meta" id="kBenchMsg"></span></div>
+      <h3>Generate signals</h3>
+      <div class="inline"><label>days <input type="number" id="kDays" value="30" min="7" max="60" style="width:70px"></label><label>pairs <input type="number" id="kPairs" value="20" min="3" max="40" style="width:70px"></label>
+        <span class="meta">(the window ends 48 h before now; use 60 days if 30 give too few signals)</span></div>
+      <div id="kEstimate" class="meta" style="margin-top:4px"></div>
+      <div class="inline" style="margin-top:8px"><button id="kGen" type="button">Generate signals / resume</button><button id="kStop" type="button" class="secondary">Stop</button><span class="meta" id="kGenMsg"></span></div>
+      <div class="bar" style="margin-top:8px"><div id="kBar"></div></div>
+      <div id="kProg" class="meta" style="margin-top:4px"></div>
+      <h3>Evaluate</h3>
+      <div class="inline"><button id="kEval" type="button">Evaluate</button><span class="meta">on the part of the window that is ready (if generation is not finished the report is marked PARTIAL)</span><span class="meta" id="kEvalMsg"></span></div>
+      <div id="kResult" style="margin-top:12px;display:none">
+        <div><span id="kVerdict" class="vb">-</span> <span class="meta" id="kVerdictWhy"></span></div>
+        <div class="rbanner" id="kNotes"></div>
+        <div class="tw" style="margin-top:8px"><table class="hist" id="kTable"></table></div>
+        <div class="tw" style="margin-top:8px"><table class="hist" id="kEngine"></table></div>
+        <div class="meta" id="kBaselines" style="margin-top:8px"></div>
+        <div class="inline" style="margin-top:8px"><button id="kCopy" type="button">Copy the result as one line</button><a id="kZip" href="#">Download all (ZIP)</a><a href="/api/replay/kronos/files.zip">Kronos signal files (ZIP)</a><span class="meta" id="kCopyMsg"></span></div>
+        <pre class="logbox" id="kLine" style="margin-top:6px;max-height:120px"></pre>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== REPORTS & LOGS ===================== -->
+  <div class="tab" id="tab-reports">
+    <section id="runs">
+      <h2>Calibration runs and Kronos evaluations</h2>
+      <p class="lead">Every report, ZIP and log of the training and calibration work is here. Everything else you can download is on the dashboard's <a href="/#downloads">Downloads</a> tab.</p>
+      <div id="runsBody"><span class="meta">loading…</span></div>
+    </section>
+  </div>
+</div>
+
+<script src="/assets/nav.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmt = x => (x === null || x === undefined ? '-' : x);
+const TABS = ['live', 'calibrate', 'kronos', 'reports'];
+let currentRun = null;
+
+function showTab() {
+  const h = (location.hash || '#live').slice(1);
+  const tab = TABS.includes(h) ? h : 'live';
+  TABS.forEach(t => $('tab-' + t).classList.toggle('on', t === tab));
+  document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
+  if (tab === 'reports') loadRuns();
+}
+window.addEventListener('hashchange', showTab);
+
+function vbadge(v) {
+  const cls = { 'edge candidate': 'vb-edge', 'unproven': 'vb-unp', 'no edge': 'vb-no', 'insufficient n': 'vb-ins' }[v] || '';
+  return '<span class="vb ' + cls + '">' + esc(v) + '</span>';
+}
+
+// ---------------------------------------------------------------- progress (one runner for calibration and Kronos evaluation)
+async function poll() {
+  const s = await fetch('/api/replay/status').then(r => r.json()).catch(() => null);
+  if (!s) return;
+  const running = s.phase && !['idle', 'done', 'failed'].includes(s.phase);
+  $('phaseBadge').textContent = s.phase + (s.status && s.status !== 'running' ? ' · ' + s.status : '');
+  const pr = s.progress || {};
+  $('barFill').style.width = Math.round((pr.fraction || 0) * 100) + '%';
+  $('counters').innerHTML = [['decisions', pr.decisions], ['trades', pr.trades], ['elapsed, s', s.elapsed_s], ['remaining, s', s.eta_s === null || s.eta_s === undefined ? '-' : s.eta_s], ['steps', (pr.steps_done || 0) + ' / ' + (pr.steps_total || 0)]]
+    .map(x => '<div class="tile"><div class="name">' + x[0] + '</div><div class="pct">' + esc(x[1] === undefined ? '-' : x[1]) + '</div></div>').join('');
+  $('logBox').textContent = (s.log || []).join('\n') || 'log is empty';
+  $('logBox').scrollTop = $('logBox').scrollHeight;
+  $('btnStop').disabled = !running;
+  if (s.run_id) { $('logLink').style.display = 'inline'; $('logLink').href = '/api/replay/runs/' + encodeURIComponent(s.run_id) + '/log'; }
+  if (s.kind === 'kronos_eval' && !running) kLoad();
+  if (s.error) $('progMsg').innerHTML = '<span style="color:var(--red)">' + esc(s.error) + '</span>';
+  if (running) setTimeout(poll, 1000);
+  else if (s.run_id && s.phase === 'done' && s.kind !== 'kronos_eval') { openRun(s.run_id); loadRuns(); }
+}
+
+async function doStop() { await fetch('/api/replay/stop', { method: 'POST' }); $('progMsg').textContent = 'stop requested (what is computed stays saved)'; }
+
+// ---------------------------------------------------------------- 1 live reference + coverage
+async function loadRef() {
+  const j = await fetch('/api/replay/live-reference').then(r => r.json()).catch(() => null);
+  if (!j || !j.available) { $('refBody').textContent = (j && j.reason) || 'no data'; loadCover(); return; }
+  const rows = Object.keys(j.bots).map(b => { const x = j.bots[b]; return '<tr><td>' + esc(b) + '</td><td>' + fmt(x.n_trades) + '</td><td>' + fmt(x.mean_trade_pct) + '</td><td>' + fmt(x.win_pct) + '</td><td>' + esc(JSON.stringify(x.exit_reasons || {})) +
+    '</td><td>' + fmt(x.avg_hold_hours) + '</td><td>' + fmt(x.open_at_end) + '</td><td>' + fmt(x.fees_usd) + '</td><td>' + esc(x.from) + ' … ' + esc(x.to) + '</td></tr>'; });
+  const st = (j.meta && j.meta.per_bot_status) || {};
+  const bad = Object.keys(st).filter(b => !st[b].ok).map(b => esc(b) + ' — ' + esc(st[b].note));
+  $('refBody').innerHTML = 'updated ' + esc((j.meta || {}).updated_at) + '<div class="tw"><table class="hist"><tr><th>bot</th><th>closed</th><th>mean / trade %</th><th>win %</th><th>exit reasons</th><th>avg hold, h</th><th>open at end</th><th>fees $</th><th>period</th></tr>' + rows.join('') + '</table></div>' +
+    (bad.length ? '<span style="color:var(--amber)">unavailable: ' + bad.join('; ') + '</span>' : '');
+  loadCover();
+}
+
+async function doRef() {
+  $('refMsg').textContent = 'reading the live bots\' trades and logs (like the export centre)…';
+  const r = await fetch('/api/replay/live-reference/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: $('refFrom').value }) });
+  const j = await r.json().catch(() => ({}));
+  $('refMsg').innerHTML = r.ok ? 'done' : '<span style="color:var(--red)">' + esc(j.detail || r.status) + '</span>';
+  loadRef();
+}
+
+async function loadCover() {
+  const j = await fetch('/api/replay/calibration/coverage').then(r => r.json()).catch(() => null);
+  if (!j || !j.available) { $('calCover').textContent = (j && j.reason) || 'no data'; $('calBots').innerHTML = ''; return; }
+  const bots = Object.keys(j.bots);
+  $('calCover').innerHTML = 'decision coverage in the logs (snapshot ' + esc((j.meta || {}).updated_at) + '):<div class="tw"><table class="hist"><tr><th>bot</th><th>first full hour</th><th>last hour</th><th>decisions</th><th>hours with decisions</th><th>pairs</th><th>restarts</th><th>LLM outage hours</th></tr>' +
+    bots.map(b => { const c = j.bots[b]; return c.available ? '<tr><td>' + esc(b) + '</td><td>' + esc(c.first_full_hour) + '</td><td>' + esc(c.last_hour) + '</td><td>' + c.n_decisions + '</td><td>' + c.hours_with_decisions + ' / ' + c.hours_in_span + '</td><td>' + c.n_pairs + '</td><td>' + c.restarts.length + '</td><td>' + c.outage_hours.length + '</td></tr>' :
+      '<tr><td>' + esc(b) + '</td><td colspan="7">' + esc(c.note) + '</td></tr>'; }).join('') + '</table></div>';
+  $('calBots').innerHTML = bots.filter(b => j.bots[b].available).map(b => '<label style="margin-right:10px"><input type="checkbox" class="calBox" value="' + esc(b) + '" checked> ' + esc(b) + '</label>').join('');
+}
+
+// ---------------------------------------------------------------- 2 calibration
+async function doCal() {
+  const bots = Array.from(document.querySelectorAll('.calBox:checked')).map(x => x.value);
+  const body = { bots, from: $('calFrom').value || null, to: $('calTo').value || null };
+  const r = await fetch('/api/replay/calibration/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('calMsg').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || r.status) + '</span>'; return; }
+  $('calMsg').textContent = 'started ' + j.run_id + ' (no LLM, $0)'; currentRun = j.run_id; poll();
+}
+
+function calTable(v, bots, title) {
+  if (!v) return '';
+  const rows = bots.map(b => { const f = v[b].full; return '<tr><td>' + esc(b) + '</td><td>' + f.n_live_entries + '</td><td>' + f.n_replay_entries + '</td><td>' + fmt(f.count_ratio) + '</td><td>' + f.matched + ' (' + fmt(f.matched_share_of_live) + ')</td><td>' + fmt(f.entry_time_diff_min.median_abs) +
+    '</td><td>' + fmt(f.entry_price_diff_pct.median_abs) + '</td><td>' + fmt(f.exit_price_diff_pct.median_abs) + '</td><td>' + fmt(f.exit_reason_agreement) + '</td><td>' + fmt(f.return_diff_pp.median_abs) + '</td><td>' + fmt(f.mean_trade_pct.live) + ' → ' + fmt(f.mean_trade_pct.replay) +
+    '</td><td>' + fmt(f.exit_mix.tv_distance) + '</td><td><span class="badge" style="color:var(' + (f.accepted ? '--green' : '--red') + ')">' + (f.accepted ? 'accepted' : 'not accepted') + '</span></td></tr>'; }).join('');
+  return '<h3>' + title + '</h3><div class="tw"><table class="hist"><tr><th>bot</th><th>live entries</th><th>replay entries</th><th>ratio</th><th>matched 1:1</th><th>entry time diff, min</th><th>entry price diff %</th><th>exit price diff %</th><th>exit reason agrees</th><th>return diff, pp (median |diff|)</th><th>mean / trade live → replay %</th><th>exit mix TV</th><th>acceptance</th></tr>' + rows + '</table></div>';
+}
+
+function renderCal(id, j) {
+  $('resId').textContent = id;
+  const bots = j.bots;
+  const cov = '<div class="tw"><table class="hist"><tr><th>bot</th><th>first full hour</th><th>last hour</th><th>decisions</th><th>hours</th><th>pairs</th><th>restarts</th><th>LLM outage hours</th></tr>' + bots.map(b => { const c = j.coverage[b]; return '<tr><td>' + esc(b) + '</td><td>' + esc(c.first_full_hour) + '</td><td>' + esc(c.last_hour) + '</td><td>' + c.n_decisions + '</td><td>' + c.hours_with_decisions + ' / ' + c.hours_in_span + '</td><td>' + c.n_pairs + '</td><td>' + c.restarts.length + '</td><td>' + c.outage_hours.length + '</td></tr>'; }).join('') + '</table></div>';
+  const abl = '<div class="tw"><table class="hist"><tr><th>bot</th><th>mechanics variant</th><th>trade count ratio</th><th>matched 1:1</th><th>median |return diff| pp</th><th>exit reason agrees</th><th>mix TV</th><th>accepted</th></tr>' + bots.map(b => Object.keys(j.ablation[b]).map(n => { const x = j.ablation[b][n]; return '<tr><td>' + esc(b) + '</td><td>' + esc(n) + '</td><td>' + fmt(x.count_ratio) + '</td><td>' + fmt(x.matched_share_of_live) + '</td><td>' + fmt(x.median_abs_return_diff_pp) + '</td><td>' + fmt(x.exit_reason_agreement) + '</td><td>' + fmt(x.exit_mix_tv) + '</td><td>' + (x.accepted ? 'yes' : 'no') + '</td></tr>'; }).join('')).join('') + '</table></div>';
+  const live = j.variants.live_like || {};
+  const causes = bots.map(b => { const c = live[b] && live[b].full.causes; return c ? '<li>' + esc(b) + ': only in live ' + esc(JSON.stringify(c.only_live)) + '; only in replay ' + esc(JSON.stringify(c.only_replay)) + '</li>' : ''; }).join('');
+  $('resBody').innerHTML = '<div class="meta">Calibration on the live bots\' real decisions, no LLM, $0. &ldquo;Before&rdquo; = P21 mechanics, &ldquo;after&rdquo; = mechanics of the live Freqtrade cycle (decisions &rarr; exits &rarr; entries, entry delay, stake formula, restarts).</div>' +
+    '<h3>Decision coverage</h3>' + cov + calTable(j.variants.live_like, bots, 'After (live-cycle mechanics)') + calTable(j.variants.legacy, bots, 'Before (P21 mechanics)') +
+    '<h3>What each fix is worth</h3>' + abl + '<h3>Why live and replay still differ (after)</h3><ul class="rules meta">' + causes + '</ul>' +
+    '<ul class="rules meta" style="margin-top:8px">' + j.limits.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' +
+    '<div class="inline" style="margin-top:8px"><a href="/api/replay/runs/' + encodeURIComponent(id) + '/download">ZIP (report.md, report.json, calibration_trades.csv, log)</a><a href="/api/replay/runs/' + encodeURIComponent(id) + '/log">log</a></div>';
+}
+
+async function openRun(id) {
+  const r = await fetch('/api/replay/runs/' + encodeURIComponent(id));
+  const j = await r.json().catch(() => ({}));
+  location.hash = '#calibrate';
+  if (!r.ok) { $('resBody').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || r.status) + '</span>'; return; }
+  if (j.type === 'calibration') renderCal(id, j);
+  else $('resBody').innerHTML = '<div class="meta">This run is not a calibration run. Open it on <a href="/replay">Replay</a>.</div>';
+}
+
+// ---------------------------------------------------------------- 3 Kronos
+function fmtEta(sec) { if (sec === null || sec === undefined) return '-'; const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60); return h + ' h ' + m + ' min'; }
+
+async function kLoad() {
+  const j = await fetch('/api/replay/kronos/state').then(r => r.json()).catch(() => null);
+  if (!j) { $('kState').textContent = 'could not read the state'; return; }
+  const p = j.progress || {}, sg = j.signals || {}, b = j.benchmark || {};
+  const bench = b.state === 'done' ? ('benchmark: ' + b.n + ' forecasts, mean ' + (b.mean_s || 0).toFixed(1) + ' s (median ' + (b.median_s || 0).toFixed(1) + ', p95 ' + (b.p95_s || 0).toFixed(1) + '), peak RAM ' + fmt(b.peak_rss_mb) + ' MB, threads ' + b.threads) :
+    b.state === 'failed' ? ('benchmark failed: ' + b.error) : b.state === 'none' ? 'no benchmark yet' : b.state;
+  $('kState').innerHTML = (j.job ? ('job ' + esc(j.job.id) + ': ' + ((j.job.pairs || []).length) + ' pairs, ' + esc(j.job.start) + ' … ' + esc(j.job.end)) : 'no job yet') + ' · signals: up ' + (sg.up || 0) + ', down ' + (sg.down || 0) + ', neutral ' + (sg.neutral || 0) + ', skipped ' + (sg.skipped || 0) + ' · ' + esc(bench);
+  const frac = p.total ? p.done / p.total : 0;
+  $('kBar').style.width = Math.round(frac * 100) + '%';
+  $('kProg').textContent = p.state === 'none' ? '' : (p.state + ' · ' + p.done + ' / ' + p.total + ' (' + Math.round(frac * 1000) / 10 + ' %) · estimated time left ' + fmtEta(p.eta_seconds) + (p.seconds_per_inference_per_shard ? ' · ' + p.seconds_per_inference_per_shard.toFixed(1) + ' s per forecast' : '') + (j.stop_flag ? ' · STOP flag is set' : '') + (p.skipped && Object.keys(p.skipped).length ? ' · skipped: ' + JSON.stringify(p.skipped) : ''));
+  if (j.latest_eval) kRender(j.latest_eval);
+  if (['running', 'stopping'].includes(p.state) || (b.state || '').indexOf('waiting') === 0) { clearTimeout(window.kTimer); window.kTimer = setTimeout(kLoad, 15000); }
+}
+
+async function kEstimate() {
+  const body = { days: +$('kDays').value, pairs: +$('kPairs').value, shards: 1 };
+  const r = await fetch('/api/replay/kronos/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('kEstimate').innerHTML = '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>'; return null; }
+  $('kEstimate').innerHTML = '<b>' + j.inferences + '</b> forecasts (' + j.hours + ' h × ' + j.pairs + ' pairs) × ' + j.seconds_per_inference + ' s on one worker = <b>~' + j.eta_hours + ' h</b>, cost $0 (CPU only).' + (j.warning ? ' <b style="color:var(--amber)">' + esc(j.warning) + '</b>' : '');
+  return j;
+}
+
+async function kBench() {
+  if (!confirm('Run the benchmark? 12 forecasts of one pair (BTC), CPU only, $0. The worker runs it when it is free.')) return;
+  const r = await fetch('/api/replay/kronos/benchmark', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"n":12}' });
+  const j = await r.json().catch(() => ({}));
+  $('kBenchMsg').innerHTML = r.ok ? 'request written, the result appears above' : '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>';
+  kLoad();
+}
+
+async function kGen() {
+  const est = await kEstimate();
+  if (!est) return;
+  if (!confirm('Generate Kronos signals?\n' + est.inferences + ' forecasts, ~' + est.eta_hours + ' h on the kronos-replay CPU, $0.' + (est.warning ? '\n\nWARNING: ' + est.warning : '') + '\n\nThe same setting resumes an interrupted job (finished forecasts are not recomputed).')) return;
+  const r = await fetch('/api/replay/kronos/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: +$('kDays').value, pairs: +$('kPairs').value, shards: 1, confirm: true }) });
+  const j = await r.json().catch(() => ({}));
+  $('kGenMsg').innerHTML = r.ok ? 'job written (' + esc(j.job.id) + '): the worker picks it up within ~20 s' : '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>';
+  kLoad();
+}
+
+async function kStop() { await fetch('/api/replay/kronos/stop', { method: 'POST' }); $('kGenMsg').textContent = 'stop requested: the worker stops after the current forecast, finished work is saved'; kLoad(); }
+
+async function kEvalRun() {
+  if (!confirm('Run the evaluation? No model and no cost: signal metrics + the replay engine (main / shorts) + baselines. Loading Bybit candles can take a few minutes.')) return;
+  const r = await fetch('/api/replay/kronos/evaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const j = await r.json().catch(() => ({}));
+  $('kEvalMsg').innerHTML = r.ok ? 'started (progress in the Progress block)' : '<span style="color:var(--red)">' + esc(j.detail || ('HTTP ' + r.status)) + '</span>';
+  if (r.ok) poll();
+}
+
+function kRender(j) {
+  $('kResult').style.display = 'block';
+  $('kVerdict').outerHTML = '<span id="kVerdict">' + vbadge(j.verdict) + '</span>';
+  const q = j.quality;
+  $('kVerdictWhy').textContent = 'net of ' + q.cost_round_trip_pct + ' % round trip, horizon ' + q.verdict_horizon_h + ' h · signal before costs: ' + j.signal_skill_gross + ' · window ' + j.window.days_covered + ' of ' + j.window.days_planned + ' days' + (j.window.partial ? ' (PARTIAL)' : '') + ' · ' + j.model;
+  $('kNotes').innerHTML = j.notes.map(x => '• ' + esc(x)).join('<br>');
+  const rows = [];
+  Object.keys(q.by_direction).forEach(sig => {
+    const d = q.by_direction[sig];
+    ['1', '4', '24'].forEach(h => {
+      const e = d.horizons[h], g = e.excess_gross, n = e.excess_net;
+      rows.push('<tr><td>' + sig + '</td><td>' + h + 'h</td><td>' + e.n + '</td><td>' + fmt(e.forward_mean_pct) + '</td><td>' + fmt(e.hit_rate_pct) + '</td><td>' + fmt(g.mean_pct) + ' ' + esc(JSON.stringify(g.ci95_pct)) + '</td><td>' + fmt(n.mean_pct) + ' ' + esc(JSON.stringify(n.ci95_pct)) + '</td><td>' + fmt(n.first_half.mean_pct) + ' (' + n.first_half.n + ')</td><td>' + fmt(n.second_half.mean_pct) + ' (' + n.second_half.n + ')</td></tr>');
+    });
+    rows.push('<tr><td><b>' + sig + '</b></td><td>verdict</td><td></td><td></td><td></td><td>' + vbadge(d.signal_skill_gross) + '</td><td>' + vbadge(d.verdict) + '</td><td></td><td></td></tr>');
+  });
+  $('kTable').innerHTML = '<tr><th>direction</th><th>horizon</th><th>n</th><th>return after signal, %</th><th>hit %</th><th>gross excess % [95% CI by day]</th><th>net excess %</th><th>1st half net % (n)</th><th>2nd half net % (n)</th></tr>' + rows.join('');
+  const er = [];
+  Object.keys(j.engine || {}).forEach(bot => ['kronos', 'rule'].forEach(m => { const e = j.engine[bot][m]; if (e) er.push('<tr><td>' + esc(bot) + ' / ' + (m === 'rule' ? 'rule (no LLM)' : 'Kronos') + '</td><td>' + e.n_decisions + '</td><td>' + e.n_trades + '</td><td>' + fmt(e.win_pct) + '</td><td>' + fmt(e.mean_trade_pct) + '</td><td>' + esc(JSON.stringify(e.ci95_pct)) + '</td><td>' + e.net_usd + '</td><td>' + e.max_drawdown_pct + '</td><td>' + fmt(e.vs_random_percentile) + '</td></tr>'); }));
+  $('kEngine').innerHTML = '<tr><th>bot / decision source</th><th>decisions</th><th>trades</th><th>win %</th><th>mean / trade %</th><th>95% CI</th><th>net $</th><th>max drawdown %</th><th>vs random (percentile)</th></tr>' + er.join('');
+  const btc = (j.baselines.btc_buy_and_hold || {}).return_pct, llm = j.baselines.llm_earlier_runs || [];
+  $('kBaselines').innerHTML = 'BTC buy-and-hold over the window: <b>' + fmt(btc) + ' %</b> · random entries: column &ldquo;vs random&rdquo; (percentile among 200 random sets with the same number of trades and the same exits) · LLM from earlier runs: ' +
+    (llm.length ? llm.map(x => esc(x.run) + ' ' + x.bot + '/' + x.mode + ' ' + esc(x.model) + ': ' + x.n_trades + ' trades, mean ' + fmt(x.mean_trade_pct) + ' % (window ' + esc(x.window[0].slice(0, 10)) + '…' + esc(x.window[1].slice(0, 10)) + ')').join('; ') : 'none in this replay directory') + '.';
+  const u = q.by_direction.up.horizons['4'].excess_net, dn = q.by_direction.down.horizons['4'].excess_net, mk = (j.engine.main || {}).kronos, mr = (j.engine.main || {}).rule;
+  $('kLine').textContent = 'Kronos-small | ' + j.window.start.slice(0, 10) + '..' + j.window.end.slice(0, 10) + (j.window.partial ? ' PARTIAL' : '') + ' | verdict ' + j.verdict + ' (gross skill ' + j.signal_skill_gross + ') | up n=' + q.by_direction.up.horizons['4'].n + ' net4h ' + fmt(u.mean_pct) + '% ' + JSON.stringify(u.ci95_pct) +
+    ' | down n=' + q.by_direction.down.horizons['4'].n + ' net4h ' + fmt(dn.mean_pct) + '% ' + JSON.stringify(dn.ci95_pct) + (mk ? ' | main Kronos ' + mk.n_trades + ' trades ' + fmt(mk.mean_trade_pct) + '% vs rule ' + (mr ? fmt(mr.mean_trade_pct) + '%' : 'n/a') : '') + ' | BTC hold ' + fmt(btc) + '%';
+  $('kZip').href = '/api/replay/kronos/eval/' + encodeURIComponent(j.eval_id) + '/download';
+}
+
+async function kCopy() {
+  const t = $('kLine').textContent;
+  try { await navigator.clipboard.writeText(t); $('kCopyMsg').textContent = 'copied'; }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($('kLine')); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); $('kCopyMsg').textContent = 'selected: press Ctrl+C'; }
+}
+
+// ---------------------------------------------------------------- reports & logs
+async function loadRuns() {
+  const [rj, dj] = await Promise.all([fetch('/api/replay/runs').then(r => r.json()).catch(() => ({ runs: [] })), fetch('/api/downloads').then(r => r.json()).catch(() => ({ groups: [] }))]);
+  const cal = rj.runs.filter(r => r.type === 'calibration');
+  const grp = (dj.groups || []).find(g => g.name === 'Training & calibration');
+  const extra = grp ? grp.items.filter(i => !/^calibration /.test(i.label)) : [];
+  const calRows = cal.map(r => '<tr><td>' + esc(r.run_id) + '</td><td>' + esc((r.params.bots || []).join(', ')) + '</td><td>' + esc(r.params.from || 'whole period') + ' … ' + esc(r.params.to || '') + '</td><td>' +
+    (r.has_report ? '<a href="#" data-open="' + esc(r.run_id) + '">report</a> · <a href="/api/replay/runs/' + encodeURIComponent(r.run_id) + '/download">ZIP</a> · <a href="/api/replay/runs/' + encodeURIComponent(r.run_id) + '/log">log</a>' : '<span class="meta">no report</span> · <a href="/api/replay/runs/' + encodeURIComponent(r.run_id) + '/log">log</a>') + '</td></tr>').join('');
+  const items = extra.map(i => '<div class="dl-item"><span class="nm">' + esc(i.label) + '</span><span class="ds">' + esc(i.description || '') + '</span><span class="ac"><a href="' + i.url + '">' + (i.kind === 'zip' ? 'ZIP' : 'download') + '</a></span></div>').join('');
+  $('runsBody').innerHTML = '<h3>Calibration runs</h3>' + (cal.length ? '<div class="tw"><table class="hist"><tr><th>run</th><th>bots</th><th>window</th><th>report · ZIP · log</th></tr>' + calRows + '</table></div>' : '<span class="meta">no calibration runs yet</span>') +
+    '<h3>Live reference, Kronos files and evaluations</h3>' + (items || '<span class="meta">nothing yet</span>');
+  document.querySelectorAll('[data-open]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); openRun(a.getAttribute('data-open')); }));
+}
+
+$('btnRef').addEventListener('click', doRef);
+$('btnCal').addEventListener('click', doCal);
+$('btnStop').addEventListener('click', doStop);
+$('kBench').addEventListener('click', kBench);
+$('kGen').addEventListener('click', kGen);
+$('kStop').addEventListener('click', kStop);
+$('kEval').addEventListener('click', kEvalRun);
+$('kCopy').addEventListener('click', kCopy);
+['kDays', 'kPairs'].forEach(id => $(id).addEventListener('change', kEstimate));
+showTab();
+poll(); loadRef(); kLoad(); kEstimate(); loadRuns();
+</script>
+</body>
+</html>

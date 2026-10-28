@@ -1,0 +1,13 @@
+2026-09-29 18:16:28,257 - freqtrade.loggers.set_log_levels - INFO - Reducing verbosity for bias tester.
+2026-09-29 18:16:28,970 - freqtrade.optimize.analysis.recursive - INFO - Start checking for recursive bias
+2026-09-29 18:16:28,978 - freqtrade.optimize.analysis.recursive - INFO - Start checking for lookahead bias on indicators only
+2026-09-29 18:16:28,982 - freqtrade.optimize.analysis.recursive - INFO - No lookahead bias on indicators found.
+2026-09-29 18:16:28,982 - freqtrade.optimize.analysis.recursive_helpers - INFO - Checking recursive and indicator-only lookahead bias of indicators of TrendV2Strategy.py took 2 seconds.
++-------------------------------------------------------------------------------------+
+|       Indicators |    199 | 210 (from strategy) |    399 |    499 |    999 |   1999 |
+|------------------+--------+---------------------+--------+--------+--------+--------|
+| realized_vol_pct | 0.000% |              0.000% | 0.000% | 0.000% | 0.000% | 0.000% |
+|           sma_1d |   nan% |                   - |      - |      - |      - |      - |
+|         btc_bull |   nan% |                   - |      - |      - |      - |      - |
++-------------------------------------------------------------------------------------+
+recursive exit=0

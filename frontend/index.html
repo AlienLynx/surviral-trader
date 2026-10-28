@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Survival Agent</title>
+<link rel="stylesheet" href="/assets/ui.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="shell"></div>
+
+  <nav class="tabs" id="tabs">
+    <a href="#overview" data-tab="overview">Overview</a>
+    <a href="#bots" data-tab="bots">Bots</a>
+    <a href="#portfolio" data-tab="portfolio">Portfolio</a>
+    <a href="#signals" data-tab="signals">Signals &amp; Kronos</a>
+    <a href="#downloads" data-tab="downloads">Downloads</a>
+    <a href="#settings" data-tab="settings">Settings</a>
+  </nav>
+
+  <!-- ================= OVERVIEW ================= -->
+  <div class="tab" id="tab-overview">
+    <section id="overview">
+      <h2>Portfolio overview</h2>
+      <div id="portfolioTotal" class="hero-total"><span class="sub">loading…</span></div>
+      <div id="portfolioTiles" class="tiles"></div>
+      <div id="portfolioVsHistory" class="note plain" style="margin-top:8px"></div>
+      <div class="note" style="margin-top:6px">
+        "vs starting capital" is the real portfolio return: current wallet total against what was put into each bot (the capital ledger).
+        It differs from the Open / Closed profit % in each bot's own Freqtrade UI, which is the average return per trade on that trade's own stake.
+        Click a bot to open its page.
+      </div>
+    </section>
+    <section id="scorecard">
+      <h2>Scorecard</h2>
+      <p class="lead">Read-only verdict per bot (display only, no automation acts on it). Click a badge for the numbers behind it.</p>
+      <div id="scorecardTiles" class="tiles"></div>
+    </section>
+  </div>
+
+  <!-- ================= BOTS ================= -->
+  <div class="tab" id="tab-bots">
+    <div class="botpick" id="botPick"></div>
+    <div id="botPage"></div>
+  </div>
+
+  <!-- ================= PORTFOLIO ================= -->
+  <div class="tab" id="tab-portfolio">
+    <div class="grid">
+      <section id="config">
+        <h2>Goal &amp; payout (shared by all bots)</h2>
+        <p class="lead">One plan for the whole setup. Each bot's own risk parameters are on its page under Bots.</p>
+        <div class="row"><label for="start">start ($)</label><input type="number" id="start" step="10"><span class="meta">Capital the plan starts from. Used only for the payout-split math, not a live balance.</span></div>
+        <div class="row"><label for="target">target ($)</label><input type="number" id="target" step="10"><span class="meta">Goal capital. Informational.</span></div>
+        <div class="row"><label for="months">months</label><input type="number" id="months" min="1"><span class="meta">Planned time from start to target. Informational.</span></div>
+        <div class="row"><label for="survival_monthly">survival cost / month ($)</label><input type="number" id="survival_monthly" step="5"><span class="meta">What the setup costs to run per month. Profit below this is not split.</span></div>
+        <div class="row"><label for="ramp_months">months before payouts start</label><input type="number" id="ramp_months" min="0"><span class="meta">No payout share for this many months after launch.</span></div>
+        <div class="row"><label for="take_pct">payout share after ramp (%)</label><input type="number" id="take_pct" min="0" max="100"><span class="meta">Share of profit above survival cost marked as payout.</span></div>
+        <div class="row"><label for="risk_pct">risk-eligible share of reinvested (%)</label><input type="number" id="risk_pct" min="0" max="100"><span class="meta">Accounting only, not wired into any bot's sizing.</span></div>
+        <div class="inline"><input type="checkbox" id="engine_enabled"><label for="engine_enabled" style="font-size:13px">Engine enabled (runs a decision cycle; starts in dry-run regardless)</label></div>
+        <div class="save-bar"><button id="saveConfig">Save thresholds</button><span class="msg" id="configMsg"></span></div>
+      </section>
+      <section id="history">
+        <h2>Daily balance history</h2>
+        <p class="lead">One snapshot per day, kept for 6 months. For spotting trends, not a trade ledger (see the bot pages).</p>
+        <div id="historyTable" class="tw" style="font-family:var(--mono);font-size:12px"></div>
+      </section>
+    </div>
+    <section id="portfolio-brain">
+      <h2>Portfolio brain <span class="badge">shadow</span></h2>
+      <p class="lead">Read-only. Runs daily at 00:10 UTC: measures the combined book against a capital floor and a CPPI risk budget and logs what a drawdown ladder <i>would</i> do. It never touches a bot.</p>
+      <div id="portfolioBrainBody"></div>
+      <div class="inline" style="margin-top:10px"><button id="brainRun" type="button" class="secondary">Refresh brain now</button><span id="brainMsg" class="meta"></span></div>
+    </section>
+    <section id="allocator">
+      <h2>Allocator &amp; market context <span class="badge" id="allocMode">...</span></h2>
+      <p class="lead"><b>Policy grow</b> (default): a bot that earns money (30+ trades, net positive now and over 7 days) is raised to 1.5x (2x with evidence <i>edge</i>); a bot that loses is stopped and gets a 0.5x trial when its control bot made money over the last 7 days (the control bot is control_long for a bot that trades long, control_short for one that trades short); the <b>circuit breaker</b> stops a bot that loses more than 1.25 average stakes, or 8 losing trades in a row, long before its 30-trade verdict; protection only scales (x0.5 below -15%, x0.25 below -25% from the high-water mark), it never idles the book. No LLM call. <b>Policy protect</b>: the original rules, an LLM proposes a weight 0..1 and hard rules (drawdown ladder, CPPI budget, macro window, opposite positions, &plusmn;25pp/day) have the last word. A run that finds a live bot uses protect automatically. Shadow = nothing is touched. Control bots and trend_ensemble are never managed.</p>
+      <div id="allocatorBody"></div>
+      <div id="allocControls" style="margin-top:10px"></div>
+      <div class="inline" style="margin-top:10px">
+        <button id="allocRun" type="button">Run allocator now</button>
+        <button id="allocKill" type="button" class="danger">Kill switch (stop enforcing, reset weights to 1)</button>
+        <button id="allocResume" type="button">Clear kill flag</button>
+        <span id="allocMsg" class="meta"></span>
+      </div>
+    </section>
+    <section id="ranker-shadow">
+      <h2>LightGBM ranker <span class="badge">paper only</span></h2>
+      <p class="lead">The walk-forward study of this model (Binance perpetuals, hourly features, 3-day hold) passed every pre-registered check except a 54% drawdown. This is the forward test: every day it ranks the top-40 perpetuals, keeps two <b>paper</b> books (A plain, B volatility-scaled) and scores itself on data that did not exist when the model was designed. It never places an order. The verdict is computed by code; <i>forward pass</i> is a hypothesis for a longer test, never proof. The research behind it (v2 study, robustness grid across holds and universes, premium features) is on the <a href="/replay#studies">Replay page, Studies tab</a>.</p>
+      <div id="rankerBody"></div>
+    </section>
+    <section id="decisions">
+      <h2>Recent accounting decisions</h2>
+      <div id="decisionsList" style="font-family:var(--mono);font-size:12px"></div>
+    </section>
+  </div>
+
+  <!-- ================= SIGNALS & KRONOS ================= -->
+  <div class="tab" id="tab-signals">
+    <section id="kronos-live">
+      <h2>Kronos feed <span class="badge">live</span></h2>
+      <p class="lead">Kronos-small forecasts all scored pairs every hour (container <code>kronos-signal</code>). The backend ranks them (24h relative strength, terciles) and publishes one file the bots read. Main, Shorts and Moonshot use it as their decision source (see each bot's page for the switch).</p>
+      <div id="kronosRankBody"></div>
+    </section>
+    <section id="announcement-guard">
+      <h2>Announcement guard <span class="badge">live</span></h2>
+      <p class="lead">Exchange delisting notices are read every 10 minutes. A coin with a notice in force gets no <b>new</b> entry from Main, Shorts, Moonshot, Listing Fade and Trend v2; exits and open trades are untouched. A rule, not an LLM: the notice has a fixed form. If the feed breaks, nothing is blocked (fail-open) and the age below turns red.</p>
+      <div id="announcementBody"></div>
+    </section>
+    <section id="signal-audit">
+      <h2>Signal audit <span class="badge">report only</span></h2>
+      <p class="lead">Did a bot's <i>buy / sell_short / hold</i> on a pair beat the market over the next 1h / 4h / 24h? Forward returns use only candles after the decision; the benchmark is the mean return of all pairs the bot scanned at the same candle. Metrics appear at 200 decisions per direction; before that: "not enough data".</p>
+      <div id="signalAuditBody"></div>
+    </section>
+  </div>
+
+  <!-- ================= DOWNLOADS ================= -->
+  <div class="tab" id="tab-downloads">
+    <section id="export">
+      <h2>Bot logs, trades and analysis bundle</h2>
+      <p class="lead">Read-only. Logs come from the bot volumes (mounted <code>:ro</code>), trades through each bot's REST API. Secrets in logs are masked. Log time is UTC. The table shows the real coverage.</p>
+      <div id="exportPresets" class="inline" style="margin-bottom:10px">
+        <button id="exPresetAnalysis">ZIP for analysis</button>
+        <button id="exPreset24h">Last 24 hours</button>
+        <button id="exPresetAll">Everything, all time</button>
+        <button id="exRefresh" class="secondary">Refresh catalog</button>
+      </div>
+      <div class="inline" style="margin-bottom:8px">
+        <label>lines <input type="number" id="exLines" min="1" max="500000" value="50000" style="width:110px"></label>
+        <label>hours <input type="number" id="exHours" min="1" max="8760" placeholder="empty = by lines" style="width:150px"></label>
+        <a id="exBundleLink" href="#">Download ZIP of the selected bots</a>
+        <span id="exBundleNote" class="meta"></span>
+      </div>
+      <div id="exportTable" class="tw"></div>
+      <div id="exportExtra" class="meta" style="margin-top:8px"></div>
+    </section>
+    <section id="all-downloads">
+      <h2>All other files</h2>
+      <p class="lead">Accounting, portfolio brain and allocator files, the signal ledger, the Kronos files, and every training / calibration / replay run with its report and log. Read-only; secrets are never listed. Runs and evaluations also have their own page: <a href="/calibration">Training &amp; calibration</a>, <a href="/replay">Replay (tests)</a>.</p>
+      <div class="inline" style="margin-bottom:8px"><button id="dlRefresh" class="secondary" type="button">Refresh list</button><span id="dlNote" class="meta"></span></div>
+      <div id="dlCatalog"></div>
+    </section>
+  </div>
+
+  <!-- ================= SETTINGS ================= -->
+  <div class="tab" id="tab-settings">
+    <section id="env">
+      <h2>Environment variables</h2>
+      <p class="lead">Read-only, live from this container's environment. Every value comes from Portainer's stack environment variables (Stacks &rarr; survival-agent &rarr; Editor &rarr; Environment variables), the only place to change them. 🔴 not set · 🟡 set but empty · 🟢 set.</p>
+      <div id="envStatusList" style="font-family:var(--mono);font-size:12px"></div>
+    </section>
+  </div>
+</div>
+
+<script src="/assets/nav.js"></script>
+<script>
+// ---------------------------------------------------------------- shared state, filled by the loaders, read by the bot page
+const STATE = { all: {}, capital: {}, scorecard: null, brain: null, alloc: null, maxOpen: {}, params: {}, exportCatalog: null };
+
+const BOT_PORTS = { main: 8099, shorts: 8110, moonshot: 8120, listing_fade: 8160, trend_ensemble: 8170, trend_v2: 8200 };
+const BOT_ACCENT = { main: 'var(--green)', shorts: 'var(--amber)', moonshot: 'var(--red)', listing_fade: 'var(--orange)', trend_ensemble: 'var(--cyan)', trend_v2: 'var(--pink)', control_long: 'var(--blue)', control_short: 'var(--blue)' };
+// Each bot's dry_run_wallet from its own config.json -- fallback only, used if neither the capital ledger nor Freqtrade's own balance gives a starting capital.
+const BOT_START_WALLET = { main: 500, shorts: 500, moonshot: 100, listing_fade: 100, trend_ensemble: 100, trend_v2: 500 };
+// every bot with a page; the first six form the portfolio (tiles, totals, history), the two controls are measuring sticks outside it
+const BOT_ALL = Object.assign({ control_long: 8180, control_short: 8190 }, BOT_PORTS);
+const BOT_ORDER = ['main', 'shorts', 'moonshot', 'listing_fade', 'trend_ensemble', 'trend_v2', 'control_long', 'control_short'];
+
+const BOT_PARAMS = {
+  main: 'Spot, long-only. Dynamic pair list by volume. Decision source: Kronos rank + LLM by default (switchable below). Exit: +10% ROI, -5% stoploss, or early rotation.',
+  shorts: 'Futures, isolated margin, long or short, leverage fixed at 1x. Decision source: Kronos rank + LLM by default (switchable below). Same pair and tier logic as Main.',
+  moonshot: 'Spot, small and new listings and memecoins (1-120 days listed). Decision source: Kronos rank + LLM by default (switchable below). Exit: trailing peak decline or 3-day max hold, -25% stoploss.',
+  listing_fade: 'Futures, RULE-BASED (no LLM). Shorts freshly listed coins (2-30 days) whose pump has fizzled: down 25%+ from the listing high, 1h close under EMA20, funding not deeply negative. Stays dry until an operator sets FADE_LIVE_MODE=true.',
+  trend_ensemble: 'Spot, long-only, RULE-BASED (no LLM). Top-20-by-volume pairs, daily candles, Donchian breakout ensemble vote (3 of 5 channels). Trailing stop from peak. Stays dry until an operator sets TREND_LIVE_MODE=true.',
+  trend_v2: 'NOT CONFIRMED BY BACKTEST (max drawdown 49% vs the 30% gate, short leg negative), dry-run only. Futures 1x, long AND short, RULE-BASED (no LLM). Same Donchian vote as v1 in both directions with a BTC 200-day SMA regime filter. Stays dry until an operator sets TREND_V2_LIVE_MODE=true.',
+  control_long: 'Baseline: Freqtrade sample strategy, spot long-only, hard dry-run. A measuring stick, never part of the profit split.',
+  control_short: 'Baseline: Freqtrade sample strategy, futures short-only 1x, hard dry-run. A measuring stick, never part of the profit split.',
+};
+
+// Structured buy/sell rules shown on each bot's page -- kept here (not pulled from a live endpoint) since this describes the code's logic, which only changes when the strategy files change.
+const BOT_STRATEGY = {
+  main: {
+    label: 'Main', kind: 'Spot · Long only',
+    buys: [
+      'Kronos ranks all scored pairs by 24h relative strength every hour; the top tercile with a high enough score becomes a buy proposal (hold when the rank file is missing or older than 2h15m)',
+      'With the default source (kronos_llm) the LLM then sees only the proposed pairs, with 24h change, volatility, market trend, news and the bot’s own recent results, and may confirm or veto',
+      'Needs a clearer signal for “satellite” pairs (outside top-5 volume, or too volatile) than “core” pairs',
+    ],
+    sells: ['+10% profit → close', '-5% loss → close', 'Rotation: held ≥2h and the decision on that pair flips back to hold → close early, free the slot'],
+    tags: ['Kronos + LLM', '+10% take-profit', '-5% stoploss', '1h candles'],
+  },
+  shorts: {
+    label: 'Shorts', kind: 'Futures · Long or short',
+    buys: [
+      'Kronos rank: top tercile → buy (long), bottom tercile → sell_short, middle → hold',
+      'With the default source (kronos_llm) the LLM confirms or vetoes each proposal',
+      'Leverage fixed at 1x always: shorting ability only, no leverage risk',
+    ],
+    sells: ['+10% profit → close', '-5% loss → close', 'Rotation: held ≥2h and the current decision no longer matches the position’s direction → close early'],
+    tags: ['Kronos + LLM', '1x leverage only', '+10% take-profit', '-5% stoploss'],
+  },
+  moonshot: {
+    label: 'Moonshot', kind: 'Spot · Young coins & memecoins',
+    buys: [
+      'Pool: coins listed 1–120 days ago (BTC/ETH excluded), up to 500 candidates by volume',
+      'Kronos rank (top tercile) proposes; with the default source the LLM confirms or vetoes, seeing 24h change, volatility, the pair’s real age, market context and news',
+      'Told explicitly to hunt memecoins: pump then die is the expected pattern, not a red flag',
+    ],
+    sells: ['Tracks each trade’s own peak profit hour by hour', 'Declining from that peak for 2 hours straight → close', 'Otherwise a hard cap at 3 days regardless of profit', '-25% hard stoploss underneath all of this'],
+    tags: ['Kronos + LLM', '$100 wallet', 'Trailing peak-exit', '3-day max hold', '-25% stoploss'],
+  },
+  listing_fade: {
+    label: 'Listing Fade', kind: 'Futures · Rule-based, no LLM',
+    buys: [
+      'No LLM call at all: faster, cheaper, never blocked by a provider rate limit',
+      'Pool: Bybit USDT perpetuals 2-30 days since listing',
+      'All three required: price down 25%+ from its own listing high, latest 1h close below its EMA20, and funding rate not deeply negative (checked at order time, avoids shorting into a squeeze)',
+    ],
+    sells: ['-12% stoploss', 'Trailing stop once in profit (Freqtrade’s native mechanism)', 'Max hold 14 days regardless'],
+    tags: ['$25 stake each', '$100 wallet', '-12% stoploss', 'No LLM', 'FADE_LIVE_MODE=false by default', 'Manual gate only'],
+  },
+  trend_ensemble: {
+    label: 'Trend Ensemble', kind: 'Spot · Rule-based, no LLM',
+    buys: [
+      'No LLM call at all: pure rules',
+      'Pool: top-20-by-volume spot pairs, daily candles',
+      'Ensemble vote across 5 Donchian channel periods (5/10/20/40/60 days): enters long when at least 3 of 5 agree today’s close broke their own N-day high',
+    ],
+    sells: ['Trailing stop from the trade’s own peak profit (Freqtrade’s native mechanism)', '-15% hard stoploss backstop'],
+    tags: ['Volatility-scaled sizing', '$100 wallet', 'Donchian ensemble', 'No LLM', 'TREND_LIVE_MODE=false by default', 'Manual gate only'],
+  },
+  trend_v2: {
+    label: 'Trend Ensemble v2', kind: 'Futures 1x · Rule-based, no LLM',
+    buys: [
+      'No LLM call at all: pure rules',
+      'Pool: top-20-by-volume futures pairs, daily candles',
+      'Same Donchian ensemble as v1, voting both ways: a close above the prior N-day high votes long, below the prior N-day low votes short',
+      'BTC regime filter: longs only while BTC is above its 200-day SMA, shorts only while below',
+      'A short is skipped when annualized funding is below -10% (it would pay that)',
+    ],
+    sells: ['Opposite Donchian channel, blocked for the first 3 daily candles (hysteresis)', '-15% hard stoploss, never blocked; no native trailing stop'],
+    tags: ['NOT CONFIRMED by backtest', 'Volatility-scaled sizing', '$500 wallet', 'Long + short', 'BTC regime filter', 'No LLM', 'TREND_V2_LIVE_MODE=false by default', 'Manual gate only'],
+  },
+  control_long: {
+    label: 'Control Long', kind: 'Spot · Baseline',
+    buys: ['Freqtrade’s own sample strategy, no custom logic', 'Exists so the other bots are judged against a plain baseline on the same market'],
+    sells: ['Sample strategy exit rules'],
+    tags: ['Baseline', 'Hard dry-run', 'Outside the profit split'],
+  },
+  control_short: {
+    label: 'Control Short', kind: 'Futures · Baseline',
+    buys: ['Freqtrade’s own sample strategy, short only, 1x', 'Baseline for the short bots'],
+    sells: ['Sample strategy exit rules'],
+    tags: ['Baseline', 'Hard dry-run', 'Outside the profit split'],
+  },
+};
+
+const botLabel = id => (BOT_STRATEGY[id] || {}).label || id;
+const $ = id => document.getElementById(id);
+
+// ---------------------------------------------------------------- tabs
+const TABS = ['overview', 'bots', 'portfolio', 'signals', 'downloads', 'settings'];
+let selectedBot = 'main';
+
+function parseHash() {
+  const parts = (location.hash || '#overview').slice(1).split('/');
+  const tab = TABS.includes(parts[0]) ? parts[0] : 'overview';
+  if (tab === 'bots' && BOT_ORDER.includes(parts[1])) selectedBot = parts[1];
+  return tab;
+}
+
+function showTab() {
+  const tab = parseHash();
+  TABS.forEach(t => { $('tab-' + t).classList.toggle('on', t === tab); });
+  document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === tab));
+  if (tab === 'bots') { renderBotPick(); renderBotPage(true); loadBotParams(); }
+  if (tab === 'downloads') loadDownloads();
+}
+
+function openBot(id) { location.hash = '#bots/' + id; }
+window.addEventListener('hashchange', showTab);
+
+// ---------------------------------------------------------------- bot picker + bot page
+function botStatusLine(id) {
+  const s = STATE.all[id];
+  if (!s) return 'loading…';
+  if (!s.available) return 'offline';
+  const n = Array.isArray(s.open_trades) ? s.open_trades.length : 0;
+  return (s.dry_run ? 'dry' : 'LIVE') + ' · ' + n + ' open';
+}
+
+function renderBotPick() {
+  $('botPick').innerHTML = BOT_ORDER.map(id =>
+    '<button type="button" class="' + (id === selectedBot ? 'on' : '') + '" data-bot="' + id + '" style="border-left-color:' + BOT_ACCENT[id] + '">' +
+      '<span class="bn">' + botLabel(id) + '</span><span class="bs">' + botStatusLine(id) + '</span></button>').join('');
+  $('botPick').querySelectorAll('button').forEach(b => b.addEventListener('click', () => openBot(b.dataset.bot)));
+}
+
+function kvRows(rows) {
+  return '<table class="kv">' + rows.filter(r => r[1] !== null && r[1] !== undefined && r[1] !== '').map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') + '</table>';
+}
+
+function fmtMaybe(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return escHtml(JSON.stringify(v));
+  return escHtml(v);
+}
+
+function botParamsCard(id) {
+  const p = STATE.params[id];
+  if (!p) return '<div class="meta">loading parameters…</div>';
+  const st = p.static || {}, lv = p.live;
+  const rows = [
+    ['strategy file', escHtml(st.strategy)],
+    ['market', escHtml(st.kind)],
+    ['decides with', escHtml(st.decider)],
+  ];
+  if (st.decision_env) {
+    rows.push(['decision source', '<b>' + escHtml(st.decision_source) + '</b> <span class="meta">env ' + escHtml(st.decision_env) + ': llm | kronos_llm | kronos</span>']);
+    rows.push(['LLM provider', '<b>' + escHtml(st.llm_provider) + '</b> <span class="meta">env ' + escHtml(st.provider_env) + ': deepseek | free | none</span>']);
+  }
+  if (lv) {
+    rows.push(['timeframe', fmtMaybe(lv.timeframe)], ['trading mode', fmtMaybe(lv.trading_mode) + (lv.margin_mode ? ' · ' + fmtMaybe(lv.margin_mode) : '')],
+      ['state', fmtMaybe(lv.state)], ['dry run', fmtMaybe(lv.dry_run)], ['max open trades (running)', fmtMaybe(lv.max_open_trades)],
+      ['stake', fmtMaybe(lv.stake_amount) + ' ' + fmtMaybe(lv.stake_currency)], ['take profit (ROI table)', fmtMaybe(lv.minimal_roi)], ['stoploss', fmtMaybe(lv.stoploss)],
+      ['trailing stop', lv.trailing_stop === undefined ? '' : fmtMaybe(lv.trailing_stop) + (lv.trailing_stop_positive ? ' (positive ' + fmtMaybe(lv.trailing_stop_positive) + ', offset ' + fmtMaybe(lv.trailing_stop_positive_offset) + ')' : '')],
+      ['exit signal', fmtMaybe(lv.use_exit_signal)], ['exchange', fmtMaybe(lv.exchange)]);
+  }
+  return kvRows(rows) + (lv ? '' : '<div class="meta" style="margin-top:6px">The bot is not reachable, so the running values are not shown. The rows above come from the repository.</div>');
+}
+
+function botMoneyCard(id) {
+  const s = STATE.all[id];
+  if (!s) return '<div class="meta">loading…</div>';
+  if (!s.available) return '<div class="meta">Not connected: ' + escHtml(s.reason || 'unknown') + '</div>';
+  const bal = s.balance || {};
+  const resolved = resolveStartCap(id, bal, STATE.capital);
+  const totalNow = (typeof bal.total === 'number') ? bal.total : bal.value;
+  const openCount = Array.isArray(s.open_trades) ? s.open_trades.length : 0;
+  const portfolio = BOT_PORTS[id] !== undefined;
+  let tiles = '<div class="tile"><div class="name">Wallet</div><div class="pct">' + (typeof totalNow === 'number' ? fmtUsd(totalNow) : 'n/a') + '</div></div>';
+  if (typeof totalNow === 'number' && resolved.amount) {
+    const pct = (totalNow - resolved.amount) / resolved.amount * 100;
+    tiles += '<div class="tile"><div class="name">vs capital put in</div><div class="pct" style="color:' + (pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</div>' +
+      '<div class="meta">of ' + fmtUsd(resolved.amount) + (resolved.source === 'ledger' ? '' : ' (' + resolved.source + ' estimate)') + '</div></div>';
+  }
+  tiles += '<div class="tile"><div class="name">Open trades</div><div class="pct">' + openCount + '</div></div>';
+  const pr = s.profit || {};
+  if (typeof pr.profit_closed_coin === 'number' || typeof pr.profit_all_coin === 'number') {
+    tiles += '<div class="tile"><div class="name">Closed trades</div><div class="pct">' + fmtMaybe(pr.closed_trade_count !== undefined ? pr.closed_trade_count : pr.trade_count) + '</div><div class="meta">win ' + fmtMaybe(pr.winning_trades) + ' / loss ' + fmtMaybe(pr.losing_trades) + '</div></div>';
+  }
+  const led = STATE.capital[id];
+  const contributions = (led && Array.isArray(led.contributions)) ? led.contributions : [];
+  const rows = contributions.map(c => (c.date || '').replace('T', ' ').slice(0, 16) + '  ' + (c.amount >= 0 ? '+' : '') + fmtUsd(c.amount) + (c.note ? '  — ' + c.note : '')).join('\n') || 'No entries yet.';
+  const open = (Array.isArray(s.open_trades) ? s.open_trades : []).map(t => '<tr><td>' + escHtml(t.pair) + '</td><td>' + (t.is_short ? 'short' : 'long') + '</td><td>' + fmtMaybe(t.open_rate) + '</td><td>' + (typeof t.profit_pct === 'number' ? t.profit_pct.toFixed(2) + '%' : '') + '</td><td>' + escHtml((t.open_date || '').slice(0, 16)) + '</td></tr>').join('');
+  return '<div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">' + tiles + '</div>' +
+    (open ? '<h4>Open trades</h4><div class="tw"><table class="hist"><tr><th>pair</th><th>side</th><th>open rate</th><th>profit</th><th>opened (UTC)</th></tr>' + open + '</table></div>' : '') +
+    (portfolio ? '<h4>Capital ledger (money put in or taken out)</h4><p class="meta" style="margin:0 0 6px;color:var(--amber)">Accounting only: this does NOT add money to the dry-run wallet. It raises the reference capital that the floor and the risk budget are measured against, so a deposit that never happened makes the book look under water and the allocator pauses the bots.</p><div class="inline"><input type="number" step="any" id="cap-amt-' + id + '" placeholder="amount ($, minus = withdraw)" style="width:200px">' +
+      '<input type="text" id="cap-note-' + id + '" placeholder="note (optional)" style="width:160px"><button type="button" onclick="recordCapital(\'' + id + '\')">Record</button></div>' +
+      '<span class="msg" id="cap-msg-' + id + '" style="display:block;margin-top:4px"></span>' +
+      '<details class="raw"><summary>ledger (' + contributions.length + ' entr' + (contributions.length === 1 ? 'y' : 'ies') + ')</summary><pre>' + escHtml(rows) + '</pre></details>' : '') +
+    '<details class="raw"><summary>raw profit data (Freqtrade style, per-trade %)</summary><pre>' + escHtml(JSON.stringify(pr, null, 1)) + '</pre></details>';
+}
+
+function botEvidenceCard(id) {
+  const out = [];
+  const sc = STATE.scorecard && STATE.scorecard.bots && STATE.scorecard.bots[id];
+  if (sc && sc.verdict) {
+    const color = SCORECARD_VERDICT_COLOR[sc.verdict] || 'var(--text-dim)';
+    out.push(['scorecard', '<span class="badge" style="color:' + color + ';border-color:' + color + '">' + escHtml(sc.verdict) + '</span> <span class="meta">trades ' + fmtMaybe(sc.trade_count) + ' · profit factor ' + fmtMaybe(sc.profit_factor) + ' · expectancy ' + (sc.expectancy_usd != null ? fmtUsd(sc.expectancy_usd) : '?') + ' · max drawdown ' + (sc.max_drawdown_pct != null ? fmtMaybe(sc.max_drawdown_pct) + '%' : '?') + '</span>' + (sc.verdict_reason ? '<div class="meta">' + escHtml(sc.verdict_reason) + '</div>' : '')]);
+  }
+  const ev = STATE.brain && STATE.brain.evidence && STATE.brain.evidence[id];
+  if (ev) {
+    const c = EVIDENCE_COLOR[ev.status] || 'var(--text-dim)';
+    out.push(['evidence (closed trades after fees)', '<span class="badge" style="color:' + c + ';border-color:' + c + '">' + escHtml(ev.status) + '</span>' + (ev.reason ? ' <span class="meta">' + escHtml(ev.reason) + '</span>' : '')]);
+  }
+  const a = STATE.alloc;
+  if (a && a.available && (a.managed_bots || []).includes(id)) {
+    const steps = ((a.steps || {})[id] || []).map(s => escHtml(s.rule) + ' (' + s.from + '→' + s.to + ')').join('; ');
+    out.push(['allocator weight', escHtml(String((a.previous || {})[id] ?? '-')) + ' → <b>' + escHtml(String((a.final || {})[id] ?? '-')) + '</b> <span class="meta">mode ' + escHtml(a.mode) + (steps ? ' · rules: ' + steps : '') + '</span>']);
+  } else if (a) {
+    out.push(['allocator weight', '<span class="meta">not managed by the allocator</span>']);
+  }
+  return out.length ? kvRows(out) : '<div class="meta">No evidence data yet.</div>';
+}
+
+function botSettingsCard(id) {
+  const d = STATE.maxOpen[id];
+  let html = '';
+  if (d) {
+    const value = d.recorded_intent != null ? d.recorded_intent : d.default_in_repo;
+    html += '<h4>Max open trades</h4><div class="inline"><input type="number" min="1" id="mot_' + id + '" value="' + value + '" style="width:90px"><button type="button" class="motSaveBtn" data-bot="' + id + '">Save</button>' +
+      '<span class="meta">repo default ' + d.default_in_repo + (d.recorded_intent != null ? ' · recorded ' + d.recorded_intent : ' · nothing recorded') + ' · env ' + escHtml(d.env_var) + '</span></div>' +
+      '<p class="meta" style="margin:6px 0 0;color:var(--red)">Saving records the intent only. To change the running bot set ' + escHtml(d.env_var) + ' in Portainer (Stacks → survival-agent → Environment variables) and redeploy.</p>' +
+      '<div class="msg" id="maxOpenTradesMsg" style="margin-top:6px"></div>';
+  } else {
+    html += '<div class="meta">This bot has no max-open-trades switch here (baseline bot).</div>';
+  }
+  if (id === 'main') {
+    html += '<h4>Trading mode (main bot only)</h4><div id="tradingModeCurrent" style="font-family:var(--mono);font-size:14px;margin-bottom:.6rem"></div>' +
+      '<div id="goLiveBlock"><p class="meta">LIVE means the main bot places real orders on Bybit once restarted. Use a sub-account holding only what you are willing to risk, with withdrawals disabled on the key. The other bots have their own <code>FREQTRADE_*__DRY_RUN</code> toggle in Portainer.</p>' +
+      '<p class="meta" style="color:var(--red)">This button records your intent but does NOT flip Freqtrade. Also set FREQTRADE__DRY_RUN=false in Portainer and redeploy.</p>' +
+      '<div class="row"><label for="liveConfirm">Type LIVE to confirm</label><input type="text" id="liveConfirm" placeholder="LIVE" style="max-width:160px"></div>' +
+      '<button id="goLiveBtn" class="danger" type="button">Enable live trading (real money)</button></div>' +
+      '<button id="goPaperBtn" type="button" style="display:none">Switch back to paper (safe)</button><div class="msg" id="tradingModeMsg" style="margin-top:6px"></div>';
+  }
+  return html;
+}
+
+function botDownloadsCard(id) {
+  const links = [
+    '<a href="/api/export/logs?bot=' + id + '&lines=50000">log (last 50 000 lines)</a>',
+    '<a href="/api/export/trades?bot=' + id + '&status=all&format=csv">trades CSV</a>',
+    '<a href="/api/export/trades?bot=' + id + '&status=all&format=json">trades JSON</a>',
+    '<a href="' + exBundleUrl(id, 'lines=50000') + '">ZIP for analysis (this bot)</a>',
+  ];
+  return '<div class="inline" style="gap:6px 18px">' + links.join('') + '</div><div class="meta" style="margin-top:6px">All other files and the all-bot ZIP are on the <a href="#downloads">Downloads</a> tab.</div>';
+}
+
+function renderBotPage(force) {
+  const box = $('botPage');
+  if (!$('tab-bots').classList.contains('on')) return;
+  // do not wipe a form the operator is typing in
+  if (!force && box.contains(document.activeElement) && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) { renderBotPick(); return; }
+  const id = selectedBot, st = BOT_STRATEGY[id], s = STATE.all[id];
+  const dry = s && s.available ? '<span class="badge ' + (s.dry_run ? 'dry' : 'live') + '">' + (s.dry_run ? 'dry-run' : 'LIVE') + '</span>' : '<span class="badge">' + (s ? 'offline' : '…') + '</span>';
+  const decider = (STATE.params[id] && STATE.params[id].static && STATE.params[id].static.decider) || '';
+  box.innerHTML =
+    '<div class="card" style="border-top:3px solid ' + BOT_ACCENT[id] + '"><div class="bothead"><div><h2>' + st.label + ' ' + dry + (decider ? ' <span class="badge">' + escHtml(decider) + '</span>' : '') + '</h2><div class="meta">' + st.kind + '</div></div>' +
+      '<a href="http://' + window.location.hostname + ':' + BOT_ALL[id] + '" target="_blank" rel="noopener">open Freqtrade UI ↗</a></div>' +
+      '<p class="lead" style="margin:8px 0 0">' + escHtml(BOT_PARAMS[id]) + '</p></div>' +
+    '<div class="grid">' +
+      '<div class="card"><h2>Strategy</h2><h4 style="margin-top:0">Buys when</h4><ul class="rules">' + st.buys.map(b => '<li>' + b + '</li>').join('') + '</ul>' +
+        '<h4>Sells when</h4><ul class="rules">' + st.sells.map(b => '<li>' + b + '</li>').join('') + '</ul><div class="tag-row">' + st.tags.map(t => '<span class="tag">' + t + '</span>').join('') + '</div></div>' +
+      '<div class="card"><h2>Parameters</h2><div id="botParams">' + botParamsCard(id) + '</div></div>' +
+    '</div>' +
+    '<div class="grid">' +
+      '<div class="card"><h2>Status &amp; money</h2>' + botMoneyCard(id) + '</div>' +
+      '<div class="card"><h2>Evidence</h2>' + botEvidenceCard(id) + '</div>' +
+    '</div>' +
+    '<div class="card" id="botWhyCard"><h2>Why is it not trading?</h2><div id="botWhy" class="meta">reading the last 24 h of its log…</div></div>' +
+    '<div class="grid">' +
+      '<div class="card' + (id === 'main' ? ' danger-zone' : '') + '"><h2>Settings</h2>' + botSettingsCard(id) + '</div>' +
+      '<div class="card"><h2>Downloads for this bot</h2>' + botDownloadsCard(id) + '</div>' +
+    '</div>';
+  box.querySelectorAll('.motSaveBtn').forEach(btn => btn.addEventListener('click', () => saveMaxOpenTrades(btn.dataset.bot)));
+  if (id === 'main') {
+    $('goLiveBtn').addEventListener('click', () => setLiveTrading(true, $('liveConfirm').value));
+    $('goPaperBtn').addEventListener('click', () => setLiveTrading(false));
+    loadTradingMode();
+  }
+  renderBotPick();
+  loadBotWhy();
+}
+
+async function loadBotWhy() {
+  const id = selectedBot;
+  const w = await fetch('/api/bots/' + id + '/why?hours=24').then(r => r.json()).catch(() => null);
+  const el = $('botWhy');
+  if (!el || id !== selectedBot) return;
+  if (!w || !w.findings) { el.textContent = 'could not read the diagnosis'; return; }
+  const col = { bad: 'var(--red)', warn: 'var(--amber)', info: 'var(--text-dim)' };
+  el.innerHTML = '<div class="meta" style="margin-bottom:6px">last ' + w.hours + ' h · ' + w.log_lines + ' log lines · ' + w.entries_filled + ' entries filled · state ' + escHtml(w.state || '?') + ' · open ' + escHtml(w.open_trades === null ? '?' : w.open_trades) + ' / ' + escHtml(w.max_open_trades === null ? '?' : w.max_open_trades) + '</div>' +
+    '<ul class="rules">' + w.findings.map(f => '<li style="color:' + (col[f.severity] || 'inherit') + '">' + escHtml(f.text) + '</li>').join('') + '</ul>';
+}
+
+async function loadBotParams() {
+  const id = selectedBot;
+  const p = await fetch('/api/bots/' + id + '/params').then(r => r.json()).catch(() => null);
+  if (p) { STATE.params[id] = p; const el = $('botParams'); if (el && id === selectedBot) el.innerHTML = botParamsCard(id); }
+}
+
+// ---------------------------------------------------------------- downloads tab
+function fmtBytes(n) {
+  if (n === null || n === undefined) return '';
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+  return n + ' B';
+}
+
+async function loadDownloads() {
+  loadExportCatalog();
+  const box = $('dlCatalog');
+  const cat = await fetch('/api/downloads').then(r => r.json()).catch(() => null);
+  if (!cat) { box.innerHTML = '<div class="meta">catalog unavailable</div>'; return; }
+  $('dlNote').textContent = cat.n + ' files';
+  box.innerHTML = cat.groups.map(g => '<div class="dl-group"><h3>' + escHtml(g.name) + '</h3>' + g.items.map(i =>
+    '<div class="dl-item"><span class="nm">' + escHtml(i.label) + '</span><span class="ds">' + escHtml(i.description || '') + (i.size !== null && i.size !== undefined ? ' · ' + fmtBytes(i.size) : '') + (i.modified ? ' · ' + escHtml(i.modified) : '') + '</span>' +
+    '<span class="ac"><a href="' + i.url + '">' + (i.kind === 'zip' ? 'ZIP' : 'download') + '</a>' + (i.log_url ? '<a href="' + i.log_url + '">log</a>' : '') + '</span></div>').join('') + '</div>').join('') || '<div class="meta">nothing to list yet</div>';
+}
+
+// export centre (bot logs, trades, bundle)
+function exSelectedBots() { return Array.from(document.querySelectorAll('.exBotChk:checked')).map(c => c.value); }
+
+function exRangeParams() {
+  const hours = parseInt($('exHours').value, 10);
+  if (hours > 0) return 'hours=' + hours;
+  const lines = parseInt($('exLines').value, 10);
+  return 'lines=' + (lines > 0 ? lines : 50000);
+}
+
+function exBundleUrl(botsCsv, rangeParams) {
+  return '/api/export/bundle?bots=' + botsCsv + '&' + rangeParams + '&include=logs,trades,brain,decisions,aggregates,signals,allocator';
+}
+
+function exUpdateLinks() {
+  const cat = STATE.exportCatalog;
+  if (!cat) return;
+  const range = exRangeParams();
+  document.querySelectorAll('.exLogLink').forEach(a => { a.href = '/api/export/logs?bot=' + a.dataset.bot + '&' + range; });
+  const sel = exSelectedBots();
+  $('exBundleLink').href = exBundleUrl(sel.length ? sel.join(',') : 'all', range);
+  const est = cat.bots.filter(b => !sel.length || sel.includes(b.id)).reduce((s, b) => s + (b.log.bytes || 0), 0);
+  const limit = (cat.limits || {}).max_bundle_bytes || 0;
+  $('exBundleNote').innerHTML = sel.length + ' of ' + cat.bots.length + ' bots' + (range.startsWith('hours') ? '' : ' · logs on disk in total ' + fmtBytes(est)) +
+    ((limit && est > limit && range.indexOf('lines=') < 0) ? ' <b style="color:var(--red)">("all" mode may exceed the limit of ' + fmtBytes(limit) + ')</b>' : '');
+}
+
+async function loadExportCatalog() {
+  const box = $('exportTable');
+  const cat = await fetch('/api/export/catalog').then(r => r.json()).catch(() => null);
+  if (!cat) { box.innerHTML = '<div class="meta">catalog unavailable</div>'; return; }
+  STATE.exportCatalog = cat;
+  const none = '<span style="color:var(--text-dim)">no data</span>';
+  const rows = cat.bots.map(b => {
+    const l = b.log, tr = b.trades;
+    const dl = [l.available ? '<a class="exLogLink" data-bot="' + b.id + '" href="#">log</a>' : '', tr.available ? '<a href="/api/export/trades?bot=' + b.id + '&status=all&format=csv">trades CSV</a>' : '', tr.available ? '<a href="/api/export/trades?bot=' + b.id + '&status=all&format=json">JSON</a>' : ''].filter(Boolean).join(' · ');
+    return '<tr><td><input type="checkbox" class="exBotChk" value="' + b.id + '" checked></td><td>' + b.id + '</td><td>' + (l.available ? l.lines.toLocaleString() + ' lines · ' + fmtBytes(l.bytes) : none) +
+      '</td><td>' + (l.available ? (l.first_ts || '?') + ' → ' + (l.last_ts || '?') : '') + '</td><td>' + (tr.available ? tr.total + ' (open ' + tr.open + ', closed ' + tr.closed + ')' : none) + '</td><td>' + dl + '</td></tr>';
+  }).join('');
+  box.innerHTML = '<table style="font-family:var(--mono);font-size:12px"><tr style="text-align:left"><th></th><th>bot</th><th>logs</th><th>period (UTC)</th><th>trades</th><th>download</th></tr>' + rows + '</table>';
+  document.querySelectorAll('.exBotChk').forEach(c => c.addEventListener('change', exUpdateLinks));
+  const brain = (cat.brain || []).map(f => f.name + ' (' + fmtBytes(f.bytes) + (f.lines != null ? ', ' + f.lines + ' lines' : '') + ')').join(', ') || 'no files';
+  const dec = cat.decisions && cat.decisions.available ? (cat.decisions.lines + ' lines · ' + fmtBytes(cat.decisions.bytes)) : 'no data';
+  $('exportExtra').innerHTML = 'Brain files: ' + escHtml(brain) + '<br>decisions.log: ' + escHtml(dec) + '<br>Logs older than commit 8153a59 do not exist: the catalog shows the real coverage.';
+  exUpdateLinks();
+}
+
+function initExportCard() {
+  $('exLines').addEventListener('input', exUpdateLinks);
+  $('exHours').addEventListener('input', exUpdateLinks);
+  $('exRefresh').addEventListener('click', loadExportCatalog);
+  $('dlRefresh').addEventListener('click', loadDownloads);
+  $('exPresetAnalysis').addEventListener('click', () => { window.location.href = exBundleUrl('all', 'lines=50000'); });
+  $('exPreset24h').addEventListener('click', () => { window.location.href = exBundleUrl('all', 'hours=24'); });
+  $('exPresetAll').addEventListener('click', () => { window.location.href = exBundleUrl('all', 'all=1'); });
+}
+
+// ---------------------------------------------------------------- Kronos feed card
+async function loadKronosRank() {
+  const el = $('kronosRankBody');
+  const [r, a] = await Promise.all([fetch('/api/kronos/rank').then(x => x.json()).catch(() => null), fetch('/api/signals/audit').then(x => x.json()).catch(() => null)]);
+  let html = '';
+  if (!r || !r.available) {
+    html += '<div class="meta">' + escHtml((r && r.reason) || 'rank endpoint unreachable') + '</div>';
+  } else {
+    const age = r.age_seconds === null || r.age_seconds === undefined ? '?' : Math.round(r.age_seconds / 60) + ' min';
+    html += '<div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
+      '<div class="tile"><div class="name">Rank file age</div><div class="pct" style="color:' + (r.fresh_for_bots ? 'var(--green)' : 'var(--red)') + '">' + age + '</div><div class="meta">' + (r.fresh_for_bots ? 'fresh, bots use it' : 'STALE: bots hold') + '</div></div>' +
+      '<div class="tile"><div class="name">Pairs scored</div><div class="pct">' + fmtMaybe(r.n_scored) + '</div></div>' +
+      '<div class="tile"><div class="name">Forecast time (UTC)</div><div class="pct" style="font-size:13px">' + escHtml(String(r.t0 || '').replace('T', ' ').slice(0, 16)) + '</div></div></div>' +
+      '<div class="tw"><table class="hist" style="margin-top:10px"><tr><th>bot</th><th>buy</th><th>sell_short</th><th>hold</th></tr>' +
+      Object.keys(r.bots || {}).map(b => '<tr><td>' + escHtml(b) + '</td><td>' + (r.bots[b].buy || 0) + '</td><td>' + (r.bots[b].sell_short || 0) + '</td><td>' + (r.bots[b].hold || 0) + '</td></tr>').join('') + '</table></div>' +
+      (r.design ? '<div class="meta" style="margin-top:6px">design: ' + escHtml(typeof r.design === 'string' ? r.design : JSON.stringify(r.design)) + '</div>' : '');
+  }
+  const kh = a && a.kronos_health;
+  if (kh) {
+    html += '<div class="meta" style="margin-top:8px"><b>last cycle</b> ' + escHtml(kh.t0) + ': ' + escHtml(kh.cycle_seconds) + ' s, ' + escHtml(kh.pairs_scored) + ' of ' + escHtml(kh.candidates) + ' pairs scored, ' + escHtml(kh.skipped_count) + ' skipped' + (kh.truncated ? ' <b style="color:var(--amber)">(truncated by the time budget)</b>' : '') + '</div>';
+  }
+  html += '<div class="meta" style="margin-top:6px">Is the signal any good? That is measured on <a href="/calibration">Training &amp; calibration</a> (historical forecasts) and by the live audit below.</div>';
+  el.innerHTML = html;
+}
+
+function rankerSpark(a, b) {
+  const pts = (c) => c || [];
+  const A = pts(a), B = pts(b);
+  if (A.length < 2) return '<div class="meta">the equity line appears after the second day</div>';
+  const all = A.map(x => x[1]).concat(B.map(x => x[1]), [0]);
+  const lo = Math.min.apply(null, all), hi = Math.max.apply(null, all), W = 560, H = 70;
+  const y = v => hi === lo ? H / 2 : H - 4 - (v - lo) / (hi - lo) * (H - 8);
+  const line = (c, col) => '<polyline fill="none" stroke="' + col + '" stroke-width="1.6" points="' + c.map((p, i) => (i / Math.max(1, c.length - 1) * W).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(' ') + '"/>';
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:560px;height:70px"><line x1="0" x2="' + W + '" y1="' + y(0).toFixed(1) + '" y2="' + y(0).toFixed(1) + '" stroke="var(--muted,#888)" stroke-dasharray="3 3" stroke-width="0.7"/>' + line(A, 'var(--amber,#d99)') + line(B, 'var(--green,#3a7)') + '</svg><div class="meta">paper equity, % of the sleeve, net of costs at 0.10% slippage: <span style="color:var(--amber,#d99)">A plain</span> · <span style="color:var(--green,#3a7)">B scaled</span></div>';
+}
+
+async function loadRanker() {
+  const el = $('rankerBody');
+  const d = await fetch('/api/ranker').then(r => r.json()).catch(() => null);
+  if (!d) { el.innerHTML = '<div class="meta">ranker endpoint unreachable</div>'; return; }
+  const st = d.status || {}, f = d.forward || {}, b = f.base || {}, s = f.stress || {}, th = d.thresholds || {}, bk = d.book || {};
+  const col = { 'forward pass': 'var(--green)', 'failing': 'var(--red)', 'unproven': 'var(--amber)', 'collecting': 'var(--muted)' }[d.verdict] || 'var(--muted)';
+  const fx = (v, n) => v === null || v === undefined ? '-' : (typeof v === 'number' ? v.toFixed(n === undefined ? 1 : n) : escHtml(v));
+  const sel = '<select id="rankerMode"><option' + (d.mode === 'off' ? ' selected' : '') + '>off</option><option' + (d.mode === 'shadow' ? ' selected' : '') + '>shadow</option></select>';
+  let h = '<div class="inline">mode ' + sel + ' <button id="rankerRun" type="button"' + (d.mode === 'off' ? ' disabled' : '') + '>Run the daily job now</button> <span class="meta" id="rankerMsg"></span></div>';
+  h += '<div class="meta" style="margin-top:6px">status <b>' + escHtml(st.state || 'not started') + '</b>' + (st.message ? ': ' + escHtml(st.message) : '') + (st.last_run ? ' · last run ' + escHtml(st.last_run) : '') +
+    (d.model ? ' · model trained ' + escHtml(d.model.trained_at) + ' on ' + escHtml(d.model.rows) + ' rows (until ' + escHtml(d.model.last_row_day) + ')' : ' · no model yet') + '</div>';
+  if (d.mode !== 'off' && (!d.model || st.state === 'downloading' || st.state === 'training')) h += '<div class="meta" style="color:var(--amber)">The first start downloads the Binance history (about 0.5 GB, about 1.5 h) and trains the model; nothing else is needed from you.</div>';
+  h += '<div style="margin-top:8px"><span class="badge" style="color:' + col + '">forward verdict: ' + escHtml(d.verdict) + '</span> <span class="meta">' + (d.verdict_failed_conditions || []).map(escHtml).join('; ') + '</span></div>';
+  h += '<div class="tw"><table class="hist" style="margin-top:8px"><tr><th>paper book</th><th>days</th><th>rebalances</th><th>net % of sleeve (0.10% / 0.30%)</th><th>APR % (0.10%)</th><th>max DD %</th><th>Sharpe</th></tr>' +
+    ['A', 'B', 'C'].map(k => '<tr><td>' + (k === 'A' ? 'A plain (market orders)' : k === 'B' ? 'B volatility-scaled' : 'C = A with limit orders') + '</td><td>' + (b.days || 0) + ' / ' + (th.min_days || '') + '</td><td>' + (b.rebalances || 0) + ' / ' + (th.min_rebalances || '') + '</td><td>' + fx((b[k] || {}).net_pct_of_sleeve, 2) + ' / ' + fx((s[k] || {}).net_pct_of_sleeve, 2) + '</td><td>' + fx((b[k] || {}).apr_pct) + '</td><td>' + fx((b[k] || {}).max_dd_pct) + '</td><td>' + fx((b[k] || {}).sharpe, 2) + '</td></tr>').join('') +
+    '</table></div><div class="meta">rank IC (scores vs what the coins really did over the next 3 days): mean <b>' + fx((b.ic || {}).mean, 4) + '</b> over ' + ((b.ic || {}).n || 0) + ' rebalances (needs ≥ ' + (th.min_ic || '') + ') · study reference: out-of-sample APR ' + escHtml((d.study || {}).oos_apr_pct) + '%, max DD ' + escHtml((d.study || {}).oos_max_dd_pct) + '%, IC ' + escHtml((d.study || {}).oos_rank_ic) + ' (backtest). Pass needs book B net &gt; 0 at both slippages and max DD ≤ ' + (th.max_dd_pct || '') + '%.</div>';
+  const ps = b.passive || {};
+  h += '<div class="meta" style="margin-top:6px">Book C trades the positions of A with limit orders (a limit ' + fx(ps.delta_pct, 2) + '% better than the 00:00 open, ' + escHtml(ps.timeout_h) + ' h to fill, then a taker chase) and is evaluated a day after each rebalance from the real hourly bars: ' + (ps.rebalances_evaluated || 0) + ' of ' + (ps.rebalances || 0) + ' rebalances evaluated' + (ps.orders ? ', <b>' + fx(100 * ps.fill_rate, 0) + '%</b> of ' + ps.orders + ' orders would have filled, ' + ps.chased + ' chased' + (ps.avg_chase_move_pct !== null && ps.avg_chase_move_pct !== undefined ? ' (the price had run ' + fx(ps.avg_chase_move_pct, 3) + '% against the order on average)' : '') + ', net effect vs A <b>' + (ps.saving_vs_A_pct_of_sleeve >= 0 ? '+' : '') + fx(ps.saving_vs_A_pct_of_sleeve, 2) + '%</b> of the sleeve' : ' (nothing evaluated yet; until then C pays the taker cost)') + '. The backtest assumed about 92% fills.</div>';
+  h += rankerSpark((b.A || {}).curve, (b.B || {}).curve);
+  const rk = d.ranking;
+  if (rk) {
+    const row = (p, sign) => '<tr><td>' + escHtml(p[0]) + '</td><td>' + (p[1] >= 0 ? '+' : '') + Number(p[1]).toFixed(4) + '</td></tr>';
+    h += '<div class="meta" style="margin-top:8px">ranking of ' + escHtml(rk.date) + ' (' + escHtml(rk.universe) + ' coins' + (rk.rebalance ? ', a rebalance day' : '') + ')</div><div style="display:flex;gap:16px;flex-wrap:wrap"><div class="tw"><table class="hist"><tr><th>top 8 (paper long)</th><th>score</th></tr>' + rk.top.map(p => row(p)).join('') + '</table></div><div class="tw"><table class="hist"><tr><th>bottom 8 (paper short)</th><th>score</th></tr>' + rk.bottom.map(p => row(p)).join('') + '</table></div></div>';
+  }
+  h += '<div class="meta" style="margin-top:6px">book since ' + escHtml(bk.started || '-') + ', last rebalance ' + escHtml(bk.last_rebalance || '-') + ', book B exposure ×' + fx(bk.scale, 2) + ' (aims at 1.0% daily volatility, only ever scaled down). Costs are applied when reading the ledger, so the verdict can be re-read at any slippage.</div>';
+  el.innerHTML = h;
+  $('rankerMode').addEventListener('change', async e => {
+    $('rankerMsg').textContent = 'saving...';
+    const r = await fetch('/api/settings/p20', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'RANKER_MODE', value: e.target.value, confirm: false }) });
+    const j = await r.json().catch(() => ({}));
+    $('rankerMsg').textContent = r.ok ? 'saved' : 'refused: ' + (j.detail || r.status);
+    loadRanker();
+  });
+  $('rankerRun').addEventListener('click', async () => {
+    const r = await fetch('/api/ranker/run', { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    $('rankerMsg').textContent = r.ok ? 'started: the status line updates in a minute' : (j.detail || r.status);
+    setTimeout(loadRanker, 5000);
+  });
+}
+
+async function loadAnnouncements() {
+  const el = $('announcementBody');
+  const d = await fetch('/api/announcements').then(r => r.json()).catch(() => null);
+  if (!d || !d.available) { el.innerHTML = '<div class="meta">' + escHtml((d && d.reason) || 'endpoint unreachable') + '</div>'; return; }
+  const coins = Object.keys(d.coins || {});
+  const age = d.age_seconds === null || d.age_seconds === undefined ? '?' : Math.round(d.age_seconds / 60) + ' min';
+  el.innerHTML = '<div class="meta">file age <b style="color:' + (d.fresh_for_bots ? 'var(--green)' : 'var(--red)') + '">' + age + '</b> · ' + d.ledger + ' notices in the ledger · ' + coins.length + ' coin(s) blocked now</div>' +
+    (coins.length ? '<div class="tw"><table class="hist" style="margin-top:8px"><tr><th>coin</th><th>from (UTC)</th><th>until (UTC)</th><th>notice</th></tr>' + coins.map(c => '<tr><td>' + escHtml(c) + '</td><td>' + escHtml(d.coins[c].from) + '</td><td>' + escHtml(d.coins[c].until) + '</td><td style="white-space:normal;text-align:left">' + escHtml(d.coins[c].reason) + '</td></tr>').join('') + '</table></div>' : '<div class="meta" style="margin-top:6px">Nothing is blocked right now.</div>');
+}
+
+// ---------------------------------------------------------------- overview / bots data
+async function loadFreqtradeSummary() {
+  const [all, capitalLedger] = await Promise.all([
+    fetch('/api/freqtrade-summary/all').then(r => r.json()).catch(() => ({})),
+    fetch('/api/capital').then(r => r.json()).catch(() => ({})),
+  ]);
+  STATE.all = all; STATE.capital = capitalLedger;
+
+  let sumStart = 0, sumNow = 0, anyData = false;
+  const tileHtml = Object.keys(BOT_PORTS).map(botId => {
+    const s = all[botId] || { available: false };
+    const accent = BOT_ACCENT[botId];
+    const label = botLabel(botId);
+    if (!s.available) {
+      return '<div class="tile" style="border-left-color:' + accent + ';cursor:pointer" data-bot="' + botId + '"><div class="name">' + label + ' <span class="badge">offline</span></div><div class="meta">' + escHtml(s.reason || 'not connected') + '</div></div>';
+    }
+    const bal = s.balance || {};
+    const startCap = resolveStartCap(botId, bal, capitalLedger).amount;
+    const totalNow = (typeof bal.total === 'number') ? bal.total : bal.value;
+    const openCount = Array.isArray(s.open_trades) ? s.open_trades.length : 0;
+    const dryBadge = '<span class="badge ' + (s.dry_run ? 'dry' : 'live') + '">' + (s.dry_run ? 'dry' : 'LIVE') + '</span>';
+    let pctHtml = '<span class="meta">no balance data</span>';
+    if (typeof totalNow === 'number' && startCap) {
+      anyData = true; sumStart += startCap; sumNow += totalNow;
+      const pct = (totalNow - startCap) / startCap * 100;
+      pctHtml = '<div class="pct" style="color:' + (pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%</div><div class="meta">' + fmtUsd(totalNow) + ' of ' + fmtUsd(startCap) + '</div>';
+    }
+    return '<div class="tile" style="border-left-color:' + accent + ';cursor:pointer" data-bot="' + botId + '"><div class="name">' + label + ' ' + dryBadge + '</div>' + pctHtml +
+      '<div class="meta">' + openCount + ' open trade' + (openCount === 1 ? '' : 's') + '</div></div>';
+  }).join('');
+  $('portfolioTiles').innerHTML = tileHtml;
+  $('portfolioTiles').querySelectorAll('[data-bot]').forEach(t => t.addEventListener('click', () => openBot(t.dataset.bot)));
+
+  const totalEl = $('portfolioTotal');
+  if (anyData) {
+    const totalPct = (sumNow - sumStart) / sumStart * 100;
+    totalEl.innerHTML = '<span class="num">' + fmtUsd(sumNow) + '</span><span class="delta" style="color:' + (totalPct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (totalPct >= 0 ? '+' : '') + totalPct.toFixed(2) + '%</span>' +
+      '<span class="sub">across all bots, ' + fmtUsd(sumStart) + ' actually put in so far</span>';
+  } else {
+    totalEl.innerHTML = '<span class="sub">No balance data yet. Check the environment variables and that each bot is reachable.</span>';
+  }
+  renderBotPage(false);
+}
+
+async function loadMaxOpenTrades() {
+  STATE.maxOpen = await fetch('/api/max-open-trades').then(r => r.json()).catch(() => ({}));
+  renderBotPage(false);
+}
+
+async function loadConfig() {
+  const cfg = await fetch('/api/config').then(r => r.json());
+  Object.keys(cfg).forEach(k => {
+    const el = document.getElementById(k);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!cfg[k];
+    else el.value = cfg[k];
+  });
+}
+
+function fmtUsd(n) { return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+// Our own ledger (backend: data/capital.json) always wins for "how much
+// was actually put in" -- it's the only source that's deposit/withdrawal
+// aware. Freqtrade's own starting_capital is a fallback (it's inferred
+// from current balance minus realized profit, so a manual deposit can
+// silently look like trading profit to it -- see AGENTS.md/backend/app.py
+// comment above the /api/capital endpoint). The hardcoded wallet map is
+// the last-resort fallback if even our own backend has no record yet.
+function resolveStartCap(botId, bal, capitalLedger) {
+  const ledgerEntry = capitalLedger[botId];
+  if (ledgerEntry && typeof ledgerEntry.total_contributed === 'number') {
+    return { amount: ledgerEntry.total_contributed, source: 'ledger' };
+  }
+  if (bal && typeof bal.starting_capital === 'number') {
+    return { amount: bal.starting_capital, source: 'freqtrade' };
+  }
+  return { amount: BOT_START_WALLET[botId], source: 'fallback' };
+}
+
+async function recordCapital(botId) {
+  const amtEl = document.getElementById('cap-amt-' + botId);
+  const noteEl = document.getElementById('cap-note-' + botId);
+  const msgEl = document.getElementById('cap-msg-' + botId);
+  const amount = Number(amtEl.value);
+  if (!amtEl.value || Number.isNaN(amount) || amount === 0) {
+    msgEl.className = 'msg err';
+    msgEl.textContent = 'Enter a non-zero amount first (negative to record a withdrawal)';
+    return;
+  }
+  const res = await fetch('/api/capital', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ bot_id: botId, amount: amount, note: noteEl.value || null }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    msgEl.className = 'msg err';
+    msgEl.textContent = data.detail || 'Failed to record';
+    return;
+  }
+  amtEl.value = '';
+  noteEl.value = '';
+  loadFreqtradeSummary();
+}
+
+function fmtPct(pct) {
+  const sign = pct >= 0 ? '+' : '';
+  const color = pct >= 0 ? 'var(--green)' : 'var(--red)';
+  return '<span style="color:' + color + '">' + sign + pct.toFixed(2) + '%</span>';
+}
+
+async function loadBalanceHistory() {
+  const history = await fetch('/api/balance-history').then(r => r.json()).catch(() => ({}));
+  const dates = Object.keys(history).sort().reverse(); // newest first
+  const container = document.getElementById('historyTable');
+  const vsHistoryEl = document.getElementById('portfolioVsHistory');
+  const botIds = Object.keys(BOT_PORTS);
+  const totalFor = (day) => botIds.reduce((sum, id) => sum + (history[day][id] || 0), 0);
+
+  if (!dates.length) {
+    container.innerHTML = '<span style="color:var(--text-dim)">No history yet -- the first daily snapshot is taken automatically within an hour of this app being up and at least one bot being reachable.</span>';
+    if (vsHistoryEl) vsHistoryEl.innerHTML = '';
+    return;
+  }
+
+  // "vs N days ago" for the overview hero -- nearest recorded day to each
+  // target offset, since a bot outage can skip a day's snapshot entirely.
+  if (vsHistoryEl) {
+    const latestDate = dates[0];
+    const latestTotal = totalFor(latestDate);
+    const findClosest = (daysAgo) => {
+      const targetTime = new Date(latestDate + 'T00:00:00Z').getTime() - daysAgo * 86400000;
+      let best = null, bestDiff = Infinity;
+      for (const d of dates) {
+        const diff = Math.abs(new Date(d + 'T00:00:00Z').getTime() - targetTime);
+        if (diff < bestDiff) { bestDiff = diff; best = d; }
+      }
+      return best;
+    };
+    const parts = [];
+    [[1, 'yesterday'], [7, '7d ago'], [30, '30d ago']].forEach(([daysAgo, label]) => {
+      const d = findClosest(daysAgo);
+      if (!d || d === latestDate) return;
+      const past = totalFor(d);
+      if (!past) return;
+      parts.push(fmtPct((latestTotal - past) / past * 100) + ' vs ' + label + ' (' + d + ')');
+    });
+    vsHistoryEl.innerHTML = parts.length ? ('Total balance: ' + parts.join(' &middot; ')) : '';
+  }
+
+  const header = '<tr><th>Date</th>' +
+    botIds.map(id => '<th>' + ((BOT_STRATEGY[id] || {}).label || id) + '</th>').join('') +
+    '<th>Total</th><th>&Delta; vs prev day</th></tr>';
+  const rows = dates.slice(0, 60).map((d, i) => {
+    const snap = history[d];
+    const total = totalFor(d);
+    const prevDate = dates[i + 1];
+    const prevTotal = prevDate ? totalFor(prevDate) : 0;
+    const deltaHtml = prevTotal ? fmtPct((total - prevTotal) / prevTotal * 100) : '<span style="color:var(--text-dim)">&mdash;</span>';
+    const botCells = botIds.map(id => snap[id] != null ? fmtUsd(snap[id]) : '<span style="color:var(--text-dim)">&mdash;</span>').join('</td><td>');
+    return '<tr><td>' + d + '</td><td>' + botCells + '</td><td><strong>' + fmtUsd(total) + '</strong></td><td>' + deltaHtml + '</td></tr>';
+  });
+  container.innerHTML = '<table class="hist">' + header + rows.join('') + '</table>' +
+    (dates.length > 60 ? '<div class="note" style="margin-top:6px">Showing the latest 60 of ' + dates.length + ' recorded days.</div>' : '');
+}
+
+async function loadDecisions() {
+  const decisions = await fetch('/api/decisions?limit=20').then(r => r.json());
+  const el = document.getElementById('decisionsList');
+  if (!decisions.length) {
+    el.innerHTML = '<span style="color:var(--text-dim)">No cycles run yet.</span>';
+    return;
+  }
+  el.innerHTML = decisions.map(d => {
+    const t = d.timestamp ? d.timestamp.replace('T', ' ').slice(0, 19) : '';
+    const outcome = d.outcome || d.stage || '?';
+    let detail = d.reason || d.reasoning || '';
+    if (d.split) {
+      detail = 'profit ' + d.split.gross_profit + ' → payout ' + d.split.payout + ', reinvested ' + d.split.reinvested;
+    }
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border)">' +
+      t + ' — <strong>' + outcome + '</strong>' + (detail ? ' — ' + detail : '') +
+      '</div>';
+  }).join('');
+}
+
+async function saveConfig() {
+  const fields = ["start","target","months","survival_monthly","ramp_months","take_pct","risk_pct"];
+  const payload = {};
+  for (const f of fields) {
+    const v = document.getElementById(f).value;
+    if (v === "") {
+      showMsg('configMsg', 'Fill in ' + f + ' first', true);
+      return;
+    }
+    payload[f] = Number(v);
+  }
+  payload.engine_enabled = document.getElementById('engine_enabled').checked;
+  const res = await fetch('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  if (res.ok) {
+    showMsg('configMsg', 'Saved', false);
+    loadStatus();
+  } else {
+    showMsg('configMsg', 'Save failed', true);
+  }
+}
+
+function showMsg(id, text, isErr) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'msg ' + (isErr ? 'err' : 'ok');
+  setTimeout(() => { el.textContent = ''; el.className = 'msg'; }, 3000);
+}
+
+async function loadEnvStatus() {
+  const items = await fetch('/api/env-status').then(r => r.json());
+  const container = document.getElementById('envStatusList');
+  container.innerHTML = '';
+
+  const DOT = { missing: '🔴', empty: '🟡', set: '🟢', default: '🟢', live: '🔴' };
+  const GROUP_LABEL = { general: 'General (shared by all LLM bots)', main: 'Main bot', shorts: 'Shorts bot', moonshot: 'Moonshot bot', listing_fade: 'Listing Fade bot (isolated experiment, rule-based)', trend_ensemble: 'Trend Ensemble bot (isolated experiment, rule-based)', trend_v2: 'Trend Ensemble v2 bot (isolated experiment, rule-based)', portfolio_brain: 'Portfolio brain (P17-A, shadow only)' };
+  const GROUP_ACCENT = { general: 'var(--border)', main: 'var(--green)', shorts: 'var(--amber)', moonshot: 'var(--red)', listing_fade: 'var(--orange, #e67e22)', trend_ensemble: 'var(--cyan, #00bcd4)', trend_v2: 'var(--pink, #ec4899)', portfolio_brain: 'var(--amber)' };
+  const GROUP_ORDER = ['general', 'main', 'shorts', 'moonshot', 'listing_fade', 'trend_ensemble', 'trend_v2', 'portfolio_brain'];
+
+  GROUP_ORDER.forEach(group => {
+    const groupItems = items.filter(it => it.group === group);
+    if (!groupItems.length) return;
+
+    const box = document.createElement('div');
+    box.style.cssText = 'border:1px solid var(--border);border-left:4px solid ' + GROUP_ACCENT[group] + ';border-radius:6px;padding:10px 12px;margin-bottom:10px';
+
+    const heading = document.createElement('div');
+    heading.style.cssText = 'font-size:13px;font-weight:600;margin-bottom:6px';
+    heading.textContent = GROUP_LABEL[group];
+    box.appendChild(heading);
+
+    groupItems.forEach(it => {
+      const row = document.createElement('div');
+      row.style.cssText = 'padding:6px 0;border-top:1px solid var(--border)';
+
+      const line = document.createElement('div');
+      const valueText = it.display !== null && it.display !== undefined
+        ? ' — ' + it.display
+        : it.status === 'missing' ? ' — not set' : ' — set but empty';
+      line.innerHTML = DOT[it.status] + ' <strong>' + it.key + '</strong>' +
+        '<span style="color:var(--text-dim)">' + valueText + '</span>';
+      row.appendChild(line);
+
+      const desc = document.createElement('div');
+      desc.className = 'note';
+      desc.style.cssText = 'margin:2px 0 0;padding-top:0;border-top:none';
+      desc.textContent = it.desc;
+      row.appendChild(desc);
+
+      box.appendChild(row);
+    });
+
+    container.appendChild(box);
+  });
+}
+
+async function loadTradingMode() {
+  const s = await fetch('/api/live-trading').then(r => r.json());
+  const el = document.getElementById('tradingModeCurrent');
+  const goLiveBlock = document.getElementById('goLiveBlock');
+  const goPaperBtn = document.getElementById('goPaperBtn');
+  if (!el || !goLiveBlock || !goPaperBtn) return;
+  if (s.live) {
+    el.innerHTML = '<span style="color:var(--red);font-weight:600">● LIVE — real Bybit orders</span>';
+    goLiveBlock.style.display = 'none';
+    goPaperBtn.style.display = 'inline-block';
+  } else {
+    el.innerHTML = '<span style="color:var(--green)">● PAPER — simulated, no real money</span>';
+    goLiveBlock.style.display = 'block';
+    goPaperBtn.style.display = 'none';
+  }
+}
+
+async function setLiveTrading(enable, confirmText) {
+  const res = await fetch('/api/live-trading', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enable: enable, confirm_text: confirmText || null})
+  });
+  const data = await res.json();
+  const msgEl = document.getElementById('tradingModeMsg');
+  if (!res.ok) {
+    msgEl.className = 'msg err';
+    msgEl.textContent = data.detail || 'Failed';
+    return;
+  }
+  msgEl.className = 'msg ok';
+  msgEl.textContent = data.note;
+  loadTradingMode();
+  loadStatus();
+}
+
+async function saveMaxOpenTrades(botId) {
+  const input = document.getElementById('mot_' + botId);
+  const value = parseInt(input.value, 10);
+  const msgEl = document.getElementById('maxOpenTradesMsg');
+  if (!value || value < 1) {
+    msgEl.className = 'msg err';
+    msgEl.textContent = 'Enter a whole number >= 1.';
+    return;
+  }
+  const res = await fetch('/api/max-open-trades', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({bot_id: botId, max_open_trades: value})
+  });
+  const resData = await res.json();
+  if (!res.ok) {
+    msgEl.className = 'msg err';
+    msgEl.textContent = resData.detail || 'Failed';
+    return;
+  }
+  msgEl.className = 'msg ok';
+  msgEl.textContent = resData.note;
+  loadMaxOpenTrades();
+}
+
+const SCORECARD_VERDICT_COLOR = { PASS: 'var(--green)', WATCH: 'var(--amber)', KILL: 'var(--red)' };
+
+async function loadScorecard() {
+  const data = await fetch('/api/scorecard').then(r => r.json()).catch(() => ({ available: false }));
+  const container = document.getElementById('scorecardTiles');
+  STATE.scorecard = data; renderBotPage(false);
+  if (!data || !data.bots) {
+    container.innerHTML = '<div class="meta">' + (data && data.reason ? data.reason : 'no scorecard data yet') + '</div>';
+    return;
+  }
+  container.innerHTML = Object.keys(BOT_PORTS).map(botId => {
+    const label = (BOT_STRATEGY[botId] || {}).label || botId;
+    const accent = BOT_ACCENT[botId];
+    const b = data.bots[botId];
+    if (!b || !b.verdict) {
+      return '<div class="tile" style="border-left-color:' + accent + '">' +
+        '<div class="name">' + label + '</div>' +
+        '<span class="badge" style="color:var(--muted,#888);border-color:var(--muted,#888)">no data</span>' +
+      '</div>';
+    }
+    const color = SCORECARD_VERDICT_COLOR[b.verdict] || 'var(--muted,#888)';
+    const details = [
+      'trades: ' + (b.trade_count != null ? b.trade_count : '?'),
+      'profit factor: ' + (b.profit_factor != null ? b.profit_factor : '?'),
+      'expectancy: ' + (b.expectancy_usd != null ? fmtUsd(b.expectancy_usd) : '?'),
+      'max drawdown: ' + (b.max_drawdown_pct != null ? b.max_drawdown_pct + '%' : '?'),
+    ].join(' · ') + (b.verdict_reason ? ' -- ' + b.verdict_reason : '');
+    return '<div class="tile" style="border-left-color:' + accent + '">' +
+      '<div class="name">' + label + '</div>' +
+      '<span class="badge scorecard-badge" data-bot="' + botId + '" style="cursor:pointer;color:' + color + ';border-color:' + color + '" title="' + details.replace(/"/g, '&quot;') + '">' + b.verdict + '</span>' +
+      '<div class="meta scorecard-details" id="scorecardDetails_' + botId + '" style="display:none;margin-top:6px">' + details + '</div>' +
+    '</div>';
+  }).join('');
+  container.querySelectorAll('.scorecard-badge').forEach(el => {
+    el.addEventListener('click', () => {
+      const details = document.getElementById('scorecardDetails_' + el.getAttribute('data-bot'));
+      details.style.display = details.style.display === 'none' ? 'block' : 'none';
+    });
+  });
+}
+
+async function loadPortfolioBrain() {
+  const el = document.getElementById('portfolioBrainBody');
+  const d = await fetch('/api/portfolio/brain').then(r => r.json()).catch(() => ({ available: false, reason: 'endpoint unreachable' }));
+  STATE.brain = d; renderBotPage(false);
+  if (!d || !d.available) {
+    el.innerHTML = '<div class="meta">' + ((d && d.reason) || 'no report yet') + '</div>';
+    return;
+  }
+  const cap = d.capital || {}, ex = d.exposure_vs_budget || {}, dd = d.drawdown || {}, e = d.exposure || {};
+  const fmt = (n) => (typeof n === 'number' ? fmtUsd(n) : '?');
+  const over = ex.exceeds_budget;
+  const tile = (name, value, color) => '<div class="tile"><div class="name">' + name + '</div>' +
+    '<div class="pct"' + (color ? ' style="color:' + color + '"' : '') + '>' + value + '</div></div>';
+  const tiles = [
+    tile('Equity (' + Object.keys(cap.per_bot_equity || {}).length + ' bots)', fmt(cap.equity)),
+    tile('High-water mark', fmt(cap.hwm)),
+    tile('Floor (' + Math.round((cap.floor_pct || 0) * 100) + '%)', fmt(cap.floor)),
+    tile('Cushion', fmt(cap.cushion), (cap.cushion || 0) > 0 ? 'var(--green)' : 'var(--red)'),
+    tile('CPPI budget ' + cap.cppi_multiplier + 'x', fmt(cap.cppi_budget)),
+    tile('Gross exposure', fmt(ex.gross_exposure), over ? 'var(--red)' : 'var(--green)'),
+    tile('Net exposure', fmt(e.net)),
+    tile('Drawdown vs HWM', (typeof dd.drawdown_from_hwm_pct === 'number' ? dd.drawdown_from_hwm_pct.toFixed(2) + '%' : 'n/a'),
+         dd.highest_rung ? 'var(--red)' : null),
+  ].join('');
+  const lines = [];
+  if (over) lines.push('<b style="color:var(--red)">Book exceeds the CPPI budget</b>' +
+    (ex.gross_over_budget_ratio ? ' (' + ex.gross_over_budget_ratio + 'x; at 5x budget: ' + (ex.exceeds_budget_5x ? 'still exceeds' : 'within') + ')' : ''));
+  if (d.partial) lines.push('<b style="color:var(--amber)">Data incomplete</b> -- unreachable: ' + (d.missing_bots || []).join(', ') + ' (drawdown rules not evaluated)');
+  (e.opposite_side_conflicts || []).forEach(c => lines.push('Opposite sides on <b>' + c.coin + '</b>: long in ' + c.long_bots.join(', ') + ' vs short in ' + c.short_bots.join(', ')));
+  if ((e.crowded_coins || []).length) lines.push('Crowded (3+ bots): ' + e.crowded_coins.map(c => c.coin + ' x' + c.bots).join(', '));
+  if (dd.highest_rung) lines.push('Ladder: ' + dd.highest_rung.level + ' -- ' + dd.highest_rung.would);
+  if (dd.weekly_would) lines.push('Weekly loss limit: ' + dd.weekly_would);
+  if (dd.monthly_would) lines.push('Monthly loss limit: ' + dd.monthly_would);
+  (d.targets || []).filter(x => x.reached).forEach(x => lines.push(x.period + ' target reached (' + x.gain_pct + '%): ' + x.protect_gains));
+  const decayed = Object.keys(d.decay || {}).filter(b => d.decay[b].flag);
+  if (decayed.length) lines.push('Decay flag (30 trades, t < -2): ' + decayed.join(', '));
+  const nv = Object.keys((d.cohorts || {}).no_added_value || {}).filter(b => d.cohorts.no_added_value[b].flag);
+  if (nv.length) lines.push('No added value vs control: ' + nv.join(', '));
+  if (d.analyst) {
+    lines.push('<i>Analyst (' + d.analyst.prompt_version + ', log only):</i> ' + d.analyst.regime_note);
+    (d.analyst.proposals || []).forEach(p => lines.push('&nbsp;&nbsp;proposal: ' + (typeof p === 'string' ? p : (p.action || '') + ' -- ' + (p.reason || ''))));
+  }
+  const ev = d.evidence || {};
+  const chips = Object.keys(ev).map(b => {
+    const e = ev[b], cg = e.cost_gate || {};
+    return '<span class="badge" style="margin:2px;color:' + (EVIDENCE_COLOR[e.status] || 'inherit') + ';border-color:' + (EVIDENCE_COLOR[e.status] || 'var(--border)') +
+      '" title="' + (e.reason || '').replace(/"/g, '&quot;') + '">' + b + ': ' + e.status + (cg.flag ? ' · fees!' : '') + '</span>';
+  }).join('');
+  if (chips) lines.push('Evidence (closed trades after fees): ' + chips);
+  if (d.live_money) lines.push('Live-money criteria: ' + ((d.live_money.eligible_bots || []).join(', ') || 'no bot passes'));
+  el.innerHTML = '<div class="tiles">' + tiles + '</div>' +
+    '<div class="meta" style="margin-top:10px;line-height:1.7">' + (lines.length ? lines.join('<br>') : 'Nothing flagged.') +
+    '<br><span style="color:var(--text-dim)">report ' + d.date + '</span></div>';
+}
+
+const EVIDENCE_COLOR = { edge: 'var(--green)', unproven: 'var(--amber)', no_edge: 'var(--red)', no_data: 'var(--muted,#888)' };
+
+function escHtml(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+const SRC_COLOR = { ok: 'var(--green)', degraded: 'var(--amber)', stale: 'var(--amber)', unavailable: 'var(--red)', not_connected: 'var(--text-dim)' };
+
+async function loadAllocator() {
+  const el = document.getElementById('allocatorBody');
+  const [a, c] = await Promise.all([
+    fetch('/api/portfolio/allocator').then(r => r.json()).catch(() => null),
+    fetch('/api/context/latest').then(r => r.json()).catch(() => null),
+  ]);
+  const badge = document.getElementById('allocMode');
+  if (!a) { el.innerHTML = '<div class="meta">allocator endpoint unreachable</div>'; return; }
+  STATE.alloc = a; renderBotPage(false);
+  badge.textContent = a.mode + (a.kill ? ' (KILLED)' : '') + (a.effective_mode && a.effective_mode !== a.mode ? ' -> ' + a.effective_mode : '');
+  let html = '';
+  html += '<div class="meta">policy <b>' + escHtml(a.policy || 'protect') + '</b>' + (a.policy_configured && a.policy_configured !== a.policy ? ' (configured ' + escHtml(a.policy_configured) + ')' : '') + (a.policy_note ? ' <span style="color:var(--amber)">' + escHtml(a.policy_note) + '</span>' : '') + (a.drawdown_factor && a.drawdown_factor < 1 ? ' · <span style="color:var(--amber)">drawdown scaling x' + a.drawdown_factor + '</span>' : '') + '</div>';
+  if (a.kill) html += '<div class="meta" style="color:var(--red)">kill switch active since ' + escHtml(a.kill.killed_at) + ': ' + escHtml(a.kill.reason) + '</div>';
+  const pf = a.portfolio || {};
+  if (a.retired && a.retired.length) html += '<div class="meta">Retired (not polled, equity frozen): ' + a.retired.map(b => escHtml(b) + (a.retired_bots && a.retired_bots[b] ? ' [' + escHtml(a.retired_bots[b].method) + ', ' + escHtml(a.retired_bots[b].frozen_equity) + '$]' : '')).join(', ') + '</div>';
+  if (a.stale_bots && a.stale_bots.length) html += '<div class="meta" style="color:var(--amber)">Stale (no answer, last known state used, &le;24h): ' + a.stale_bots.map(escHtml).join(', ') + '</div>';
+  if (a.unreachable_bots && a.unreachable_bots.length) html += '<div class="meta" style="color:var(--red)">Unreachable &gt;24h (last equity kept, exposure unknown): ' + a.unreachable_bots.map(escHtml).join(', ') + '</div>';
+  if (pf.partial) html += '<div class="meta" style="color:var(--red)"><b>Incomplete data</b> (never-seen bots: ' + (pf.missing_bots || []).map(escHtml).join(', ') + ') -- ladder/floor rules only warn, weights are not cut by them.</div>';
+  (a.warnings || []).forEach(w => { html += '<div class="meta" style="color:var(--amber)">' + escHtml(w) + '</div>'; });
+  if (a.stuck_bots && a.stuck_bots.length) html += '<div class="meta" style="color:var(--red)"><b>Resume NOT verified:</b> ' + a.stuck_bots.map(escHtml).join(', ') + ' stay in paused_by_allocator (nothing was rolled back automatically; use the kill switch or check the bot).</div>';
+  if (a.mode_reasons && a.mode_reasons.length) html += '<div class="meta" style="color:var(--amber)">enforce downgraded: ' + a.mode_reasons.map(escHtml).join('; ') + '</div>';
+  if (!a.available) {
+    html += '<div class="meta">' + escHtml(a.reason || 'no allocator run yet') + '</div>';
+  } else {
+    const rows = a.managed_bots.map(b => {
+      if ((a.retired || []).includes(b)) return '<tr><td>' + b + '</td><td colspan="4" class="meta">retired -- no weight, no REST calls</td></tr>';
+      const bs = (a.bots || {})[b] || {};
+      const steps = (a.steps || {})[b] || [];
+      const r = (a.llm && a.llm.reasons && a.llm.reasons[b]) || '';
+      return '<tr><td>' + b + '</td><td>' + escHtml(bs.evidence_status || '-') + '</td><td>' + ((a.previous || {})[b] ?? '-') + ' &rarr; <b>' +
+        ((a.final || {})[b] ?? '-') + '</b></td><td>' + steps.map(s => escHtml(s.rule) + ' (' + s.from + '&rarr;' + s.to + ')').join('; ') +
+        '</td><td class="meta">' + escHtml(r) + (a.grow && a.grow[b] && a.grow[b].class ? ' <span class="badge"' + (a.grow[b].class === 'breaker' ? ' style="color:var(--red)"' : '') + '>' + escHtml(a.grow[b].class) + '</span>' : '') + '</td></tr>';
+    }).join('');
+    html += '<table style="font-family:var(--mono);font-size:12px;border-collapse:collapse;width:100%"><tr style="text-align:left"><th>bot</th><th>evidence</th><th>weight</th><th>rules fired</th><th>reason</th></tr>' + rows + '</table>';
+    html += '<div class="meta" style="margin-top:6px">last run ' + escHtml(a.ts) + ' (' + escHtml(a.trigger) + '), ' + (a.policy === 'grow' ? 'rules from the results of each bot (no LLM call)' : 'LLM reply ' + (a.llm && a.llm.valid ? 'valid' + (a.llm.attempts > 1 ? ' (2nd attempt)' : '') : '<b>invalid after ' + ((a.llm && a.llm.attempts) || 1) + ' attempt(s) -> no change</b>')) +
+      '. ' + escHtml(a.note || '') + '</div>';
+    const cf = a.counterfactual || {};
+    if (cf.with_allocator) {
+      html += '<div class="meta">counterfactual (' + escHtml(cf.verdict) + '): with allocator ' + cf.with_allocator.net_pnl_usd + '$ / max DD ' + cf.with_allocator.max_drawdown_usd +
+        '$ vs weight=1 ' + cf.without_allocator.net_pnl_usd + '$ / max DD ' + cf.without_allocator.max_drawdown_usd + '$ &middot; ' + cf.days_covered + ' days, ' + cf.trades_used + ' trades &middot; ' + escHtml(cf.reason || '') + '</div>';
+    } else if (cf.verdict) {
+      html += '<div class="meta">counterfactual: ' + escHtml(cf.verdict) + ' -- ' + escHtml(cf.reason || '') + '</div>';
+    }
+  }
+  if (c && c.available) {
+    const chips = Object.keys(c.sources).map(k => {
+      const s = c.sources[k];
+      return '<span class="badge" style="margin:2px;color:' + (SRC_COLOR[s.status] || 'inherit') + ';border-color:' + (SRC_COLOR[s.status] || 'var(--border)') + '" title="' +
+        escHtml(s.reason || '') + '">' + k + ': ' + s.status + (s.ok_share !== undefined && s.ok_share !== null ? ' ' + Math.round(s.ok_share * 100) + '%' : '') + '</span>';
+    }).join('');
+    const fl = c.flags || {};
+    const fv = x => (x && x.value !== null && x.value !== undefined) ? String(x.value) : 'unknown';
+    html += '<div style="margin-top:8px"><b>Context</b> <span class="meta">snapshot ' + escHtml(c.ts) + '</span><br>' + chips + '</div>' +
+      '<div class="meta">macro_event_within_24h: ' + fv(fl.macro_event_within_24h) + ' &middot; liquidation_cascade: ' + fv(fl.liquidation_cascade) +
+      ' &middot; funding_extreme: ' + ((fl.funding_extreme_coins || []).join(', ') || 'none') + ' &middot; oi_spike: ' + ((fl.oi_spike_coins || []).join(', ') || 'none') + '</div>' +
+      ((c.reminders || []).length ? '<div class="meta" style="color:var(--amber)">' + c.reminders.map(escHtml).join('<br>') + '</div>' : '');
+  } else {
+    html += '<div class="meta" style="margin-top:8px">context: ' + escHtml((c && c.reason) || 'unavailable') + '</div>';
+  }
+  el.innerHTML = html;
+  loadAllocControls();
+}
+
+function fadeGuardLine(bp) {
+  if (!bp) return 'bot parameters endpoint unreachable';
+  const w = (bp.wanted && bp.wanted.listing_fade) || {}, f = bp.file && bp.file.listing_fade;
+  if (!f) return 'wanted ' + escHtml(w.reentry_cooldown_h) + ' h; not published to the bot yet (the first publish runs a few minutes after start; until then the bot uses its own environment value)';
+  const age = bp.age_s === null || bp.age_s === undefined ? '?' : Math.round(bp.age_s / 60) + ' min';
+  return 'the bot sees <b>' + escHtml(f.reentry_cooldown_h) + ' h</b> (published ' + age + ' ago' + (bp.fresh ? '' : ', <b style="color:var(--red)">stale: the bot uses its environment value</b>') + (f.reentry_cooldown_h !== w.reentry_cooldown_h ? '; wanted ' + escHtml(w.reentry_cooldown_h) + ' h, arrives within ~10 minutes' : '') + ')';
+}
+
+async function loadAllocControls() {
+  const el = document.getElementById('allocControls');
+  const d = await fetch('/api/settings/p20').then(r => r.json()).catch(() => null);
+  const bp = await fetch('/api/bot-params').then(r => r.json()).catch(() => null);
+  if (!d || !d.settings) { el.innerHTML = '<div class="meta">settings endpoint unreachable</div>'; return; }
+  const S = d.settings, rd = d.readiness || {};
+  const src = k => '<span class="meta">(' + S[k].source + ')</span>';
+  const sel = (k) => '<select id="set_' + k + '">' + S[k].options.map(o => '<option' + (o === S[k].value ? ' selected' : '') + '>' + o + '</option>').join('') + '</select>';
+  const excluded = (S.ALLOCATOR_EXCLUDED_BOTS.value || '').split(',').filter(Boolean);
+  const bots = d.managed_bots.map(b => '<label style="margin-right:10px"><input type="checkbox" class="allocExcl" value="' + b + '"' + (excluded.includes(b) ? ' checked' : '') + '> ' + b + '</label>').join('');
+  const retired = (S.ALLOCATOR_RETIRED_BOTS.value || '').split(',').filter(Boolean);
+  const retBots = d.managed_bots.map(b => '<label style="margin-right:10px"><input type="checkbox" class="allocRet" value="' + b + '"' + (retired.includes(b) ? ' checked' : '') + '> ' + b + '</label>').join('');
+  let html = '<b>Switches</b> <span class="meta">(saved in the dashboard, override the environment; every change is logged)</span><table style="font-size:13px;margin-top:4px">' +
+    '<tr><td>Allocator mode</td><td>' + sel('PORTFOLIO_BRAIN_MODE') + ' <button id="setMode" type="button">Apply</button> ' + src('PORTFOLIO_BRAIN_MODE') + '</td></tr>' +
+    '<tr><td>Allocator policy<br><span class="meta">grow: raise winners, stop losers, never idle the book · protect: the original loss rules</span></td><td>' + sel('ALLOCATOR_POLICY') + ' ' + src('ALLOCATOR_POLICY') + '</td></tr>' +
+    '<tr><td>Market-context collector</td><td>' + sel('MARKET_CONTEXT_MODE') + ' ' + src('MARKET_CONTEXT_MODE') + '</td></tr>' +
+    '<tr><td>Signal audit (nightly)</td><td>' + sel('SIGNAL_AUDIT_MODE') + ' ' + src('SIGNAL_AUDIT_MODE') + '</td></tr>' +
+    '<tr><td>Circuit breaker<br><span class="meta">grow policy: stop a bot that loses fast, before its 30-trade verdict (needs at least 5 trades; it can restart through the normal control-bot trial)</span></td><td>' + sel('ALLOCATOR_BREAKER') + ' ' + src('ALLOCATOR_BREAKER') + '<br>stop when the loss since the last restart is more than ' + sel('ALLOCATOR_BREAKER_STAKES') + ' average stakes ' + src('ALLOCATOR_BREAKER_STAKES') + '<br>or after ' + sel('ALLOCATOR_BREAKER_STREAK') + ' losing trades in a row (0 = off) ' + src('ALLOCATOR_BREAKER_STREAK') + '</td></tr>' +
+    '<tr><td>Listing Fade re-entry cooldown<br><span class="meta">hours a pair stays blocked after a stop-loss (trailing-stop exits never block); 0 = off</span></td><td>' + sel('FADE_REENTRY_COOLDOWN_H') + ' h ' + src('FADE_REENTRY_COOLDOWN_H') + '<br><span class="meta">' + fadeGuardLine(bp) + '</span></td></tr>' +
+    '<tr><td>Probe weight 0.1 after N days at 0</td><td>' + sel('ALLOCATOR_PROBE') + ' after <input id="set_ALLOCATOR_PROBE_DAYS" type="number" min="1" max="90" style="width:60px" value="' + escHtml(S.ALLOCATOR_PROBE_DAYS.value) + '"> days ' + src('ALLOCATOR_PROBE') + '</td></tr>' +
+    '<tr><td>Leave these bots alone<br><span class="meta">(full size, never paused)</span></td><td>' + bots + ' <button id="setExcl" type="button">Save</button></td></tr>' +
+    '<tr><td>Retired bots<br><span class="meta">(stopped for good: not polled, equity frozen, no weight)</span></td><td>' + retBots + ' <button id="setRet" type="button">Save</button> ' + src('ALLOCATOR_RETIRED_BOTS') + '<br>frozen balance override: <input id="set_ALLOCATOR_RETIRED_FROZEN" style="width:200px" placeholder="botname:412.35" value="' + escHtml(S.ALLOCATOR_RETIRED_FROZEN.value) + '"> <span class="meta">(empty = last known balance from the brain snapshots)</span></td></tr></table>' +
+    '<div class="meta" style="margin-top:4px">Control bots and trend_ensemble are never managed and have no switch. Mode <b>off</b> also turns the daily brain off.</div>';
+  const w = (rd.warnings || []).map(escHtml);
+  if (rd.live_bots && rd.live_bots.length) w.push('dry_run=false on ' + rd.live_bots.map(escHtml).join(', ') + ' -- enforce is refused');
+  if (rd.unverified_bots && rd.unverified_bots.length) w.push('dry_run cannot be verified on ' + rd.unverified_bots.map(escHtml).join(', '));
+  if (w.length) html += '<div class="meta" style="color:var(--amber);margin-top:4px">' + w.join('<br>') + '</div>';
+  el.innerHTML = html;
+  const post = async (key, value, confirmFlag) => {
+    const msg = document.getElementById('allocMsg');
+    msg.textContent = 'saving ' + key + '...';
+    try {
+      const r = await fetch('/api/settings/p20', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key, value: value, confirm: !!confirmFlag }) });
+      const j = await r.json().catch(() => ({}));
+      msg.textContent = r.ok ? key + ' saved' : key + ' refused: ' + (j.detail || r.status);
+    } catch (e) { msg.textContent = key + ': failed'; }
+    loadAllocator();
+  };
+  ['ALLOCATOR_POLICY', 'ALLOCATOR_BREAKER', 'ALLOCATOR_BREAKER_STAKES', 'ALLOCATOR_BREAKER_STREAK', 'FADE_REENTRY_COOLDOWN_H', 'MARKET_CONTEXT_MODE', 'SIGNAL_AUDIT_MODE', 'ALLOCATOR_PROBE'].forEach(k => document.getElementById('set_' + k).addEventListener('change', e => post(k, e.target.value)));
+  document.getElementById('set_ALLOCATOR_PROBE_DAYS').addEventListener('change', e => post('ALLOCATOR_PROBE_DAYS', e.target.value));
+  document.getElementById('setExcl').addEventListener('click', () => post('ALLOCATOR_EXCLUDED_BOTS', Array.from(document.querySelectorAll('.allocExcl:checked')).map(x => x.value).join(',')));
+  document.getElementById('setRet').addEventListener('click', async () => {
+    await post('ALLOCATOR_RETIRED_FROZEN', document.getElementById('set_ALLOCATOR_RETIRED_FROZEN').value.trim());
+    await post('ALLOCATOR_RETIRED_BOTS', Array.from(document.querySelectorAll('.allocRet:checked')).map(x => x.value).join(','));
+  });
+  document.getElementById('setMode').addEventListener('click', () => {
+    const v = document.getElementById('set_PORTFOLIO_BRAIN_MODE').value;
+    if (v === 'enforce') {
+      const warn = (rd.warnings || []).length ? '\n\nNot verified:\n- ' + (rd.warnings || []).join('\n- ') : '';
+      if (!confirm('Switch the allocator to ENFORCE? It will pause and resize the 8 managed bots (dry-run only; refused if any has dry_run=false).' + warn)) return;
+      post('PORTFOLIO_BRAIN_MODE', v, true);
+    } else {
+      post('PORTFOLIO_BRAIN_MODE', v, false);
+    }
+  });
+}
+
+async function allocPost(path, label) {
+  const msg = document.getElementById('allocMsg');
+  msg.textContent = label + '...';
+  try {
+    const r = await fetch(path, { method: 'POST' });
+    msg.textContent = label + ': ' + (r.ok ? 'done' : 'failed (' + r.status + ')');
+  } catch (e) { msg.textContent = label + ': failed'; }
+  loadAllocator();
+}
+document.getElementById('allocKill').addEventListener('click', () => {
+  if (confirm('Stop enforcing, resume paused bots and reset all weights to 1?')) allocPost('/api/portfolio/allocator/kill', 'kill switch');
+});
+document.getElementById('allocRun').addEventListener('click', () => allocPost('/api/portfolio/allocator/run', 'allocator run'));
+document.getElementById('allocResume').addEventListener('click', () => allocPost('/api/portfolio/allocator/resume', 'clear kill flag'));
+
+async function loadSignalAudit() {
+  const el = document.getElementById('signalAuditBody');
+  const d = await fetch('/api/signals/audit').then(r => r.json()).catch(() => ({ available: false, reason: 'endpoint unreachable' }));
+  if (!d || !d.available || !d.bots) { el.innerHTML = '<div class="meta">' + escHtml((d && d.reason) || 'no audit yet') + '</div>'; return; }
+  const fmt = (s) => (!s || !s.n) ? '-' : (s.mean_excess_pct + '% [' + (s.excess_ci95_pct ? s.excess_ci95_pct.join(', ') : '?') + '] n=' + s.n + ' hit ' + Math.round(s.hit_rate * 100) + '%');
+  const need = d.min_actions_per_direction;
+  const rows = Object.keys(d.bots).map(bot => {
+    const b = d.bots[bot];
+    const bd = b.by_direction || {};
+    return ['buy', 'sell_short'].map((dir, i) => {
+      const x = bd[dir] || { actions: (b.by_action || {})[dir] || 0, status: 'not enough data' };
+      const head = i === 0 ? '<td rowspan="2">' + bot + '<br><span class="meta">' + b.decisions + ' decisions (hold not counted)</span></td>' : '';
+      if (x.status !== 'ok') {
+        return '<tr>' + head + '<td>' + dir + '</td><td colspan="3"><span style="color:var(--text-dim)">not enough data</span> -- ' + x.actions + ' / ' + need + ' actions</td></tr>';
+      }
+      return '<tr>' + head + '<td>' + dir + '</td><td>' + fmt(x.h1) + '</td><td>' + fmt(x.h4) + '</td><td>' + fmt(x.h24) + '</td></tr>';
+    }).join('');
+  }).join('');
+  el.innerHTML = '<table style="font-family:var(--mono);font-size:12px;border-collapse:collapse;width:100%">' +
+    '<tr style="text-align:left"><th>bot</th><th>side</th><th>1h: excess% [95% CI]</th><th>4h</th><th>24h</th></tr>' + rows + '</table>' +
+    (d.kronos_health ? '<div class="meta" style="margin-top:6px"><b>kronos last cycle</b> ' + escHtml(d.kronos_health.t0) + ': ' + escHtml(d.kronos_health.cycle_seconds) + ' s, ' +
+      escHtml(d.kronos_health.pairs_scored) + ' of ' + escHtml(d.kronos_health.candidates) + ' pairs scored, ' + escHtml(d.kronos_health.skipped_count) + ' skipped' +
+      (d.kronos_health.truncated ? ' <b style="color:var(--amber)">(truncated by the time budget)</b>' : '') + '</div>' : '') +
+    (d.bots.kronos && d.bots.kronos.verdict ? '<div class="meta" style="margin-top:6px"><b>kronos verdict</b> (' + escHtml(d.bots.kronos.verdict.days_of_data) + ' days of data): ' +
+      Object.keys(d.bots.kronos.verdict.directions).map(k => escHtml(k) + ' = ' + escHtml(d.bots.kronos.verdict.directions[k].status)).join(', ') + ' -- ' + escHtml(d.bots.kronos.verdict.criteria) + '</div>' : '') +
+    '<div class="meta" style="margin-top:6px">' + (d.caveats || []).map(escHtml).join(' · ') + '<br>audit ' + escHtml(d.generated_at) + '</div>';
+}
+
+
+function refreshLiveData() {
+  // Re-run every AUTO_REFRESH_MS so a transient bot timeout or a slow initial load self-heals without F5.
+  // loadConfig() is left out: it reflects settings the operator is editing, not live state.
+  loadStatus();
+  loadFreqtradeSummary();
+  loadEnvStatus();
+  loadDecisions();
+  loadBalanceHistory();
+  loadScorecard();
+  loadPortfolioBrain();
+  loadSignalAudit();
+  loadKronosRank();
+  loadAnnouncements();
+  loadRanker();
+  loadAllocator();
+  loadBotParams();
+  loadMaxOpenTrades();
+  if ($('tab-downloads').classList.contains('on')) loadDownloads();
+}
+
+const AUTO_REFRESH_MS = 30000;
+
+$('saveConfig').addEventListener('click', saveConfig);
+$('brainRun').addEventListener('click', async () => {
+  $('brainMsg').textContent = 'running…';
+  const r = await fetch('/api/portfolio/brain/run', { method: 'POST' }).then(x => x.json()).catch(() => null);
+  $('brainMsg').textContent = !r ? 'failed' : !r.ran ? r.reason : 'equity ' + r.equity + ' · high-water mark ' + r.hwm + ' · drawdown ' + r.drawdown_from_hwm_pct + '%' + (r.highest_rung ? ' · ' + r.highest_rung : ' · no ladder rung') + (r.hwm_rebased ? ' · ' + r.hwm_rebased : '');
+  loadPortfolioBrain();
+});
+initExportCard();
+loadConfig();
+showTab();
+refreshLiveData();
+setInterval(refreshLiveData, AUTO_REFRESH_MS);
+</script>
+</body>
+</html>

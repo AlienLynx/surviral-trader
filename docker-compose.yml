@@ -1,0 +1,569 @@
+version: "3.8"
+
+# Single stack, deployed straight from Git in Portainer (Stacks -> Add
+# stack -> Repository, point at this repo, compose path
+# "docker-compose.yml"). Both services share Compose's automatic
+# per-stack network, so survival-agent reaches Freqtrade at
+# http://freqtrade:8080 with no extra setup.
+#
+# Both services build their images from this repo. Freqtrade's
+# config.json/strategies are baked into its image (see
+# freqtrade/Dockerfile) rather than bind-mounted, because Portainer's
+# git-deployed stacks leave bind-mount host folders empty instead of
+# populating them from the repo.
+#
+# Every piece of state that needs to survive a stack redeploy uses a
+# *named* Docker volume, not a host bind-mount -- this was a real,
+# expensive lesson (see AGENTS.md): host bind-mount paths (relative
+# to the repo checkout, or even carefully-discovered absolute paths
+# inside Portainer's own managed directory) turned out to depend on
+# server-specific details and Portainer's own working-directory
+# handling in ways that repeatedly broke. Named volumes are portable,
+# host-path-agnostic, and get correctly seeded with the image's own
+# file ownership on first use -- which also fixed a separate
+# PermissionError from Freqtrade running as a non-root user.
+#
+# Freqtrade's own credentials do NOT use env_file at all, after
+# extensive debugging found Compose's actual container-creation step
+# for that service doesn't reliably read an externally-referenced
+# env_file the same way survival-agent's own build does -- even with
+# an identical, confirmed-populated path. Instead, Freqtrade's
+# environment: block uses Compose's own ${VAR} substitution, sourced
+# from Portainer's native stack-level "Environment variables" UI
+# (Stacks -> survival-agent -> Editor -> Environment variables) --
+# Portainer's first-class, reliable mechanism for exactly this. Enter
+# the same values there that you enter in the app's own Credentials
+# panel (there's a "Copy for Portainer" button in that panel to save
+# re-typing).
+
+services:
+  survival-agent:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: survival-agent
+    restart: unless-stopped
+    ports:
+      - "3446:8088"
+    volumes:
+      - survival-agent-data:/data
+      # P20: shared with the 8 managed bots (read-only there): context_latest.json + weights.json
+      - allocator-shared:/allocator
+      # P20.4: the kronos-signal container's append-only signals, read-only here (the nightly audit ingests them into the ledger)
+      - kronos-data:/kronos:ro
+      # P22 K2: historical Kronos signals (job, candles, signals) shared with the kronos-replay worker; replay output only, never the live /kronos files
+      - kronos-replay-data:/data/replay/kronos
+      # P18 export centre: every bot's `*-db` volume, mounted READ-ONLY. Only the log files
+      # (freqtrade.log*) are ever read from these; SQLite files are never opened -- trades
+      # come from each bot's REST API.
+      - freqtrade-db:/bots/main:ro
+      - freqtrade-shorts-db:/bots/shorts:ro
+      - freqtrade-moonshot-db:/bots/moonshot:ro
+      - freqtrade-listing-fade-db:/bots/listing_fade:ro
+      - freqtrade-trend-ensemble-db:/bots/trend_ensemble:ro
+      - freqtrade-trend-v2-db:/bots/trend_v2:ro
+      - freqtrade-control-long-db:/bots/control_long:ro
+      - freqtrade-control-short-db:/bots/control_short:ro
+    environment:
+      - DATA_DIR=/data
+      - BOTS_DIR=/bots
+      # shown read-only on the Bots page (the bots themselves read the same variables)
+      - MAIN_DECISION_SOURCE=${MAIN_DECISION_SOURCE:-kronos_llm}
+      - MAIN_LLM_PROVIDER=${MAIN_LLM_PROVIDER:-deepseek}
+      - SHORTS_DECISION_SOURCE=${SHORTS_DECISION_SOURCE:-kronos_llm}
+      - SHORTS_LLM_PROVIDER=${SHORTS_LLM_PROVIDER:-deepseek}
+      - MOONSHOT_DECISION_SOURCE=${MOONSHOT_DECISION_SOURCE:-kronos_llm}
+      - MOONSHOT_LLM_PROVIDER=${MOONSHOT_LLM_PROVIDER:-deepseek}
+      # Every var any of the three Freqtrade bots read from Portainer,
+      # piped in here too -- so the :3446 dashboard's "Environment
+      # variables" section is a live, read-only mirror of exactly what
+      # Portainer actually has, not a second place to type values that
+      # could drift out of sync (that happened for real, more than
+      # once, before this fix -- see AGENTS.md).
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - FREQTRADE_API_USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE_API_PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE_API_JWT_SECRET=${FREQTRADE_API_JWT_SECRET:-}
+      - BYBIT_API_KEY=${BYBIT_API_KEY:-}
+      - BYBIT_API_SECRET=${BYBIT_API_SECRET:-}
+      - BYBIT_SHORTS_API_KEY=${BYBIT_SHORTS_API_KEY:-}
+      - BYBIT_SHORTS_API_SECRET=${BYBIT_SHORTS_API_SECRET:-}
+      - BYBIT_MOONSHOT_API_KEY=${BYBIT_MOONSHOT_API_KEY:-}
+      - BYBIT_MOONSHOT_API_SECRET=${BYBIT_MOONSHOT_API_SECRET:-}
+      - FREQTRADE__DRY_RUN=${FREQTRADE__DRY_RUN:-}
+      - FREQTRADE_SHORTS__DRY_RUN=${FREQTRADE_SHORTS__DRY_RUN:-}
+      - FREQTRADE_MOONSHOT__DRY_RUN=${FREQTRADE_MOONSHOT__DRY_RUN:-}
+      # P17-B: Trend Ensemble v2's own vars, mirrored so the dashboard env
+      # status shows what Portainer really has (same pattern as above).
+      - BYBIT_TREND_V2_API_KEY=${BYBIT_TREND_V2_API_KEY:-}
+      - BYBIT_TREND_V2_API_SECRET=${BYBIT_TREND_V2_API_SECRET:-}
+      - FREQTRADE_TREND_V2__DRY_RUN=${FREQTRADE_TREND_V2__DRY_RUN:-}
+      - TREND_V2_LIVE_MODE=${TREND_V2_LIVE_MODE:-false}
+      # P17-A portfolio brain (shadow only -- reads bots' GET endpoints, writes
+      # files under /data, never touches a bot). There is no enforce mode.
+      - SIGNAL_AUDIT_MODE=${SIGNAL_AUDIT_MODE:-on}
+      - PORTFOLIO_BRAIN_MODE=${PORTFOLIO_BRAIN_MODE:-enforce}
+      # P20.4: bots stopped for good. Not polled, no weight, no dry_run check, equity frozen as a constant. Also a dashboard switch.
+      - ALLOCATOR_RETIRED_BOTS=${ALLOCATOR_RETIRED_BOTS:-}
+      # allocator switches that were dashboard-only: now also settable here (the dashboard switch still overrides). Defaults = the code's defaults.
+      - ALLOCATOR_POLICY=${ALLOCATOR_POLICY:-grow}
+      - RANKER_MODE=${RANKER_MODE:-off}
+      - ALLOCATOR_BREAKER=${ALLOCATOR_BREAKER:-on}
+      - ALLOCATOR_BREAKER_STAKES=${ALLOCATOR_BREAKER_STAKES:-1.25}
+      - ALLOCATOR_BREAKER_STREAK=${ALLOCATOR_BREAKER_STREAK:-8}
+      - FADE_REENTRY_COOLDOWN_H=${FADE_REENTRY_COOLDOWN_H:-24}
+      - ALLOCATOR_EXCLUDED_BOTS=${ALLOCATOR_EXCLUDED_BOTS:-}
+      - ALLOCATOR_RETIRED_FROZEN=${ALLOCATOR_RETIRED_FROZEN:-}
+      - ALLOCATOR_PROBE=${ALLOCATOR_PROBE:-on}
+      - ALLOCATOR_PROBE_DAYS=${ALLOCATOR_PROBE_DAYS:-7}
+      - ALLOCATOR_COIN_LIMIT=${ALLOCATOR_COIN_LIMIT:-0.25}
+      - MARKET_CONTEXT_MODE=${MARKET_CONTEXT_MODE:-on}
+      # P21 Replay (page /replay). An empty value means "built-in default". Without both PRICE variables a replay job cannot start (the dollar limit
+      # could not be enforced); REPLAY_MAX_USD can only be lowered in the form, never raised.
+      - REPLAY_MAX_USD=${REPLAY_MAX_USD:-}
+      - REPLAY_WORKERS=${REPLAY_WORKERS:-}
+      - REPLAY_MIN_START=${REPLAY_MIN_START:-}
+      - REPLAY_PRICE_IN_PER_M=${REPLAY_PRICE_IN_PER_M:-}
+      - REPLAY_PRICE_OUT_PER_M=${REPLAY_PRICE_OUT_PER_M:-}
+      - REPLAY_FEE_PCT=${REPLAY_FEE_PCT:-}
+      - REPLAY_SLIPPAGE_PCT=${REPLAY_SLIPPAGE_PCT:-}
+      # P21.1-E: optional second model for replay smoke tests (one provider + one key, never pooled); empty = DeepSeek only
+      - REPLAY_LLM_PROVIDER=${REPLAY_LLM_PROVIDER:-}
+      - REPLAY_LLM_BASE_URL=${REPLAY_LLM_BASE_URL:-}
+      - REPLAY_LLM_MODEL=${REPLAY_LLM_MODEL:-}
+      - REPLAY_LLM_API_KEY=${REPLAY_LLM_API_KEY:-}
+      - REPLAY_LLM_RPM=${REPLAY_LLM_RPM:-}
+      - REPLAY_LLM_DAILY_CAP=${REPLAY_LLM_DAILY_CAP:-}
+      - REPLAY_LLM_PRICE_IN_PER_M=${REPLAY_LLM_PRICE_IN_PER_M:-}
+      - REPLAY_LLM_PRICE_OUT_PER_M=${REPLAY_LLM_PRICE_OUT_PER_M:-}
+      - PORTFOLIO_FLOOR_PCT=${PORTFOLIO_FLOOR_PCT:-0.90}
+      - CPPI_MULTIPLIER=${CPPI_MULTIPLIER:-3}
+      - TARGET_MONTHLY_PCT=${TARGET_MONTHLY_PCT:-1.0}
+      - TARGET_WEEKLY_PCT=${TARGET_WEEKLY_PCT:-0.25}
+      # Survival framing for the LLM prompts (see get_survival_context() in
+      # each strategy). Same Portainer-stack-vars pattern as everything else:
+      # set once in Portainer, mirrored here so the dashboard env-status
+      # shows exactly what the bots see. Mode is "grow" (zero withdrawals,
+      # 4-month runway) until the operator flips it to "extract".
+      - SURVIVAL_MONTHLY_USD=${SURVIVAL_MONTHLY_USD:-60}
+      - SURVIVAL_RUNWAY_MONTHS=${SURVIVAL_RUNWAY_MONTHS:-4}
+      - SURVIVAL_MODE=${SURVIVAL_MODE:-grow}
+      - SURVIVAL_TARGET_MONTHLY_USD=${SURVIVAL_TARGET_MONTHLY_USD:-1000}
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILO_API_KEY=${KILO_API_KEY:-}
+      - AION_API_KEY=${AION_API_KEY:-}
+      - AGNES_API_KEY=${AGNES_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - LLM7_API_KEY=${LLM7_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - FREQTRADE_SECOND_OPINION_ENABLED=${FREQTRADE_SECOND_OPINION_ENABLED:-false}
+      - FREQTRADE_SHORTS_SECOND_OPINION_ENABLED=${FREQTRADE_SHORTS_SECOND_OPINION_ENABLED:-false}
+      - FREQTRADE_MOONSHOT_SECOND_OPINION_ENABLED=${FREQTRADE_MOONSHOT_SECOND_OPINION_ENABLED:-false}
+
+  freqtrade:
+    build:
+      context: ./freqtrade
+      dockerfile: Dockerfile
+    container_name: freqtrade
+    restart: unless-stopped
+    environment:
+      - FREQTRADE_UI_HOST=${FREQTRADE_UI_HOST:-localhost}
+      # dry-run paper money (applied at the bot's next start; keep it equal to the capital ledger of this bot, see ENVIRONMENT_VARIABLES.md)
+      - FREQTRADE__DRY_RUN_WALLET=${MAIN_DRY_RUN_WALLET:-500}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE_API_JWT_SECRET:-}
+      - FREQTRADE__EXCHANGE__KEY=${BYBIT_API_KEY:-}
+      - FREQTRADE__EXCHANGE__SECRET=${BYBIT_API_SECRET:-}
+      - FREQTRADE__DRY_RUN=${FREQTRADE__DRY_RUN:-true}
+      # Per-bot max_open_trades override, no image rebuild needed --
+      # Freqtrade's own FREQTRADE__{KEY} env convention (confirmed
+      # against the real freqtrade 2026.8 source, see AGENTS.md's P12
+      # entry) reads this as a plain top-level int override.
+      - FREQTRADE__MAX_OPEN_TRADES=${MAIN_MAX_OPEN_TRADES:-10}
+      - SURVIVAL_MONTHLY_USD=${SURVIVAL_MONTHLY_USD:-60}
+      - SURVIVAL_RUNWAY_MONTHS=${SURVIVAL_RUNWAY_MONTHS:-4}
+      - SURVIVAL_MODE=${SURVIVAL_MODE:-grow}
+      - SURVIVAL_TARGET_MONTHLY_USD=${SURVIVAL_TARGET_MONTHLY_USD:-1000}
+      # P23: decision source (llm | kronos_llm | kronos) and LLM provider (deepseek | free | none); see ENVIRONMENT_VARIABLES.md
+      - MAIN_DECISION_SOURCE=${MAIN_DECISION_SOURCE:-kronos_llm}
+      - MAIN_LLM_PROVIDER=${MAIN_LLM_PROVIDER:-deepseek}
+      # P5 ensemble second-opinion (Phase 1, shadow mode -- see AGENTS.md).
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILO_API_KEY=${KILO_API_KEY:-}
+      - AION_API_KEY=${AION_API_KEY:-}
+      - AGNES_API_KEY=${AGNES_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - LLM7_API_KEY=${LLM7_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - FREQTRADE_SECOND_OPINION_ENABLED=${FREQTRADE_SECOND_OPINION_ENABLED:-false}
+    volumes:
+      - freqtrade-db:/freqtrade/user_data/db
+      - allocator-shared:/allocator:ro   # P20: context snapshot + allocator weights (read-only)
+    ports:
+      - "8099:8080"
+    # CORS origins of the bot UIs come from FREQTRADE_UI_HOST (see entrypoint-cors.sh in the bot directory)
+    entrypoint: ["/freqtrade/entrypoint-cors.sh"]
+    command: >
+      trade
+      --db-url sqlite:////freqtrade/user_data/db/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --logfile /freqtrade/user_data/db/freqtrade.log
+      --strategy DeepSeekStrategy
+
+  # Second bot: same DeepSeek-driven approach, but futures + can short,
+  # always at 1x leverage (see the strategy file's docstring for why).
+  # Untouched, unrelated to the first bot -- own dry-run toggle, own
+  # Bybit key variable (Freqtrade's own docs recommend one exchange
+  # sub-account per bot instance; empty by default, only needed to go
+  # live). Shares the same FreqUI login and DeepSeek/OpenRouter keys
+  # by choice, for simplicity.
+  freqtrade-shorts:
+    build:
+      context: ./freqtrade-shorts
+      dockerfile: Dockerfile
+    container_name: freqtrade-shorts
+    restart: unless-stopped
+    environment:
+      - FREQTRADE_UI_HOST=${FREQTRADE_UI_HOST:-localhost}
+      # dry-run paper money (applied at the bot's next start; keep it equal to the capital ledger of this bot, see ENVIRONMENT_VARIABLES.md)
+      - FREQTRADE__DRY_RUN_WALLET=${SHORTS_DRY_RUN_WALLET:-500}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE_API_JWT_SECRET:-}
+      - FREQTRADE__EXCHANGE__KEY=${BYBIT_SHORTS_API_KEY:-}
+      - FREQTRADE__EXCHANGE__SECRET=${BYBIT_SHORTS_API_SECRET:-}
+      - FREQTRADE__DRY_RUN=${FREQTRADE_SHORTS__DRY_RUN:-true}
+      # Per-bot max_open_trades override, no image rebuild needed -- see Main's own comment above.
+      - FREQTRADE__MAX_OPEN_TRADES=${SHORTS_MAX_OPEN_TRADES:-10}
+      - SURVIVAL_MONTHLY_USD=${SURVIVAL_MONTHLY_USD:-60}
+      - SURVIVAL_RUNWAY_MONTHS=${SURVIVAL_RUNWAY_MONTHS:-4}
+      - SURVIVAL_MODE=${SURVIVAL_MODE:-grow}
+      - SURVIVAL_TARGET_MONTHLY_USD=${SURVIVAL_TARGET_MONTHLY_USD:-1000}
+      # P23: decision source (llm | kronos_llm | kronos) and LLM provider (deepseek | free | none); see ENVIRONMENT_VARIABLES.md
+      - SHORTS_DECISION_SOURCE=${SHORTS_DECISION_SOURCE:-kronos_llm}
+      - SHORTS_LLM_PROVIDER=${SHORTS_LLM_PROVIDER:-deepseek}
+      # P5 ensemble second-opinion (Phase 1, shadow mode -- see AGENTS.md).
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILO_API_KEY=${KILO_API_KEY:-}
+      - AION_API_KEY=${AION_API_KEY:-}
+      - AGNES_API_KEY=${AGNES_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - LLM7_API_KEY=${LLM7_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - FREQTRADE_SHORTS_SECOND_OPINION_ENABLED=${FREQTRADE_SHORTS_SECOND_OPINION_ENABLED:-false}
+    volumes:
+      - freqtrade-shorts-db:/freqtrade/user_data/db
+      - allocator-shared:/allocator:ro   # P20
+    ports:
+      - "8110:8080"
+    # CORS origins of the bot UIs come from FREQTRADE_UI_HOST (see entrypoint-cors.sh in the bot directory)
+    entrypoint: ["/freqtrade/entrypoint-cors.sh"]
+    command: >
+      trade
+      --db-url sqlite:////freqtrade/user_data/db/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --logfile /freqtrade/user_data/db/freqtrade.log
+      --strategy DeepSeekShortsStrategy
+
+  # Third bot: small/new-listing "moonshot" hunter, spot only (no
+  # shorting here -- see the strategy file's docstring for the exit
+  # logic). Small dry_run_wallet by design -- meant to be a slice of
+  # risk-tolerant capital, not the main position. Own dry-run toggle
+  # and own Bybit key variable, same reasoning as the shorts bot.
+  freqtrade-moonshot:
+    build:
+      context: ./freqtrade-moonshot
+      dockerfile: Dockerfile
+    container_name: freqtrade-moonshot
+    restart: unless-stopped
+    environment:
+      - FREQTRADE_UI_HOST=${FREQTRADE_UI_HOST:-localhost}
+      # dry-run paper money (applied at the bot's next start; keep it equal to the capital ledger of this bot, see ENVIRONMENT_VARIABLES.md)
+      - FREQTRADE__DRY_RUN_WALLET=${MOONSHOT_DRY_RUN_WALLET:-100}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE_API_JWT_SECRET:-}
+      - FREQTRADE__EXCHANGE__KEY=${BYBIT_MOONSHOT_API_KEY:-}
+      - FREQTRADE__EXCHANGE__SECRET=${BYBIT_MOONSHOT_API_SECRET:-}
+      - FREQTRADE__DRY_RUN=${FREQTRADE_MOONSHOT__DRY_RUN:-true}
+      # Per-bot max_open_trades override, no image rebuild needed -- see Main's own comment above.
+      - FREQTRADE__MAX_OPEN_TRADES=${MOONSHOT_MAX_OPEN_TRADES:-10}
+      - SURVIVAL_MONTHLY_USD=${SURVIVAL_MONTHLY_USD:-60}
+      - SURVIVAL_RUNWAY_MONTHS=${SURVIVAL_RUNWAY_MONTHS:-4}
+      - SURVIVAL_MODE=${SURVIVAL_MODE:-grow}
+      - SURVIVAL_TARGET_MONTHLY_USD=${SURVIVAL_TARGET_MONTHLY_USD:-1000}
+      # P23: decision source (llm | kronos_llm | kronos) and LLM provider (deepseek | free | none); see ENVIRONMENT_VARIABLES.md
+      - MOONSHOT_DECISION_SOURCE=${MOONSHOT_DECISION_SOURCE:-kronos_llm}
+      - MOONSHOT_LLM_PROVIDER=${MOONSHOT_LLM_PROVIDER:-deepseek}
+      # P5 ensemble second-opinion (Phase 1, shadow mode -- see AGENTS.md).
+      - XAI_API_KEY=${XAI_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - KILO_API_KEY=${KILO_API_KEY:-}
+      - AION_API_KEY=${AION_API_KEY:-}
+      - AGNES_API_KEY=${AGNES_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - LLM7_API_KEY=${LLM7_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - FREQTRADE_MOONSHOT_SECOND_OPINION_ENABLED=${FREQTRADE_MOONSHOT_SECOND_OPINION_ENABLED:-false}
+    volumes:
+      - freqtrade-moonshot-db:/freqtrade/user_data/db
+      - allocator-shared:/allocator:ro   # P20
+    ports:
+      - "8120:8080"
+    # CORS origins of the bot UIs come from FREQTRADE_UI_HOST (see entrypoint-cors.sh in the bot directory)
+    entrypoint: ["/freqtrade/entrypoint-cors.sh"]
+    command: >
+      trade
+      --db-url sqlite:////freqtrade/user_data/db/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --logfile /freqtrade/user_data/db/freqtrade.log
+      --strategy DeepSeekMoonshotStrategy
+  # P11: seventh bot, isolated on purpose -- RULE-BASED, no LLM call and
+  # no DEEPSEEK_API_KEY/OPENROUTER_API_KEY/SURVIVAL_*_USD env at all
+  # (see ListingFadeStrategy.py's own docstring for why). Own DB, own
+  # config, own port, own live gate. dry_run:true / FADE_LIVE_MODE=false
+  # until a human decides otherwise.
+  freqtrade-listing-fade:
+    build:
+      context: ./freqtrade-listing-fade
+      dockerfile: Dockerfile
+    container_name: freqtrade-listing-fade
+    restart: unless-stopped
+    environment:
+      - FREQTRADE_UI_HOST=${FREQTRADE_UI_HOST:-localhost}
+      # dry-run paper money (applied at the bot's next start; keep it equal to the capital ledger of this bot, see ENVIRONMENT_VARIABLES.md)
+      - FREQTRADE__DRY_RUN_WALLET=${FADE_DRY_RUN_WALLET:-100}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE_API_JWT_SECRET:-}
+      - FREQTRADE__EXCHANGE__KEY=${BYBIT_FADE_API_KEY:-}
+      - FREQTRADE__EXCHANGE__SECRET=${BYBIT_FADE_API_SECRET:-}
+      - FREQTRADE__DRY_RUN=${FREQTRADE_LISTING_FADE__DRY_RUN:-true}
+      # Per-bot max_open_trades override, no image rebuild needed -- see Main's own comment above.
+      - FREQTRADE__MAX_OPEN_TRADES=${FADE_MAX_OPEN_TRADES:-3}
+      # Second, independent live gate -- on top of FREQTRADE_LISTING_FADE__DRY_RUN
+      # above, not instead of it. See ListingFadeStrategy.py's module docstring.
+      - FADE_LIVE_MODE=${FADE_LIVE_MODE:-false}
+      - FADE_REENTRY_COOLDOWN_H=${FADE_REENTRY_COOLDOWN_H:-24}
+    volumes:
+      - freqtrade-listing-fade-db:/freqtrade/user_data/db
+      - allocator-shared:/allocator:ro   # P20
+    ports:
+      - "8160:8080"
+    # CORS origins of the bot UIs come from FREQTRADE_UI_HOST (see entrypoint-cors.sh in the bot directory)
+    entrypoint: ["/freqtrade/entrypoint-cors.sh"]
+    command: >
+      trade
+      --db-url sqlite:////freqtrade/user_data/db/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --logfile /freqtrade/user_data/db/freqtrade.log
+      --strategy ListingFadeStrategy
+
+  # P11: eighth bot, isolated on purpose -- same rule-based, no-LLM
+  # reasoning as freqtrade-listing-fade above. Own DB, own config, own
+  # port, own live gate. dry_run:true / TREND_LIVE_MODE=false until a
+  # human decides otherwise.
+  freqtrade-trend-ensemble:
+    build:
+      context: ./freqtrade-trend-ensemble
+      dockerfile: Dockerfile
+    container_name: freqtrade-trend-ensemble
+    restart: unless-stopped
+    environment:
+      - FREQTRADE_UI_HOST=${FREQTRADE_UI_HOST:-localhost}
+      # dry-run paper money (applied at the bot's next start; keep it equal to the capital ledger of this bot, see ENVIRONMENT_VARIABLES.md)
+      - FREQTRADE__DRY_RUN_WALLET=${TREND_DRY_RUN_WALLET:-100}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE_API_JWT_SECRET:-}
+      - FREQTRADE__EXCHANGE__KEY=${BYBIT_TREND_API_KEY:-}
+      - FREQTRADE__EXCHANGE__SECRET=${BYBIT_TREND_API_SECRET:-}
+      - FREQTRADE__DRY_RUN=${FREQTRADE_TREND__DRY_RUN:-true}
+      # Per-bot max_open_trades override, no image rebuild needed -- see Main's own comment above.
+      - FREQTRADE__MAX_OPEN_TRADES=${TREND_MAX_OPEN_TRADES:-10}
+      # Second, independent live gate -- on top of FREQTRADE_TREND__DRY_RUN
+      # above, not instead of it. See TrendEnsembleStrategy.py's module docstring.
+      - TREND_LIVE_MODE=${TREND_LIVE_MODE:-false}
+    volumes:
+      - freqtrade-trend-ensemble-db:/freqtrade/user_data/db
+    ports:
+      - "8170:8080"
+    # CORS origins of the bot UIs come from FREQTRADE_UI_HOST (see entrypoint-cors.sh in the bot directory)
+    entrypoint: ["/freqtrade/entrypoint-cors.sh"]
+    command: >
+      trade
+      --db-url sqlite:////freqtrade/user_data/db/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --logfile /freqtrade/user_data/db/freqtrade.log
+      --strategy TrendEnsembleStrategy
+
+  # P17-B: Trend Ensemble v2 -- rule-based (no LLM), futures 1x isolated, long+short,
+  # BTC 200d regime filter, opposite-channel exit. Own DB / config / port / live
+  # gate, exactly like the other isolated rule-based bots. v1 (freqtrade-trend-
+  # ensemble above) is frozen as the comparison point. dry_run:true /
+  # TREND_V2_LIVE_MODE=false until a human decides otherwise.
+  freqtrade-trend-v2:
+    build:
+      context: ./freqtrade-trend-v2
+      dockerfile: Dockerfile
+    container_name: freqtrade-trend-v2
+    restart: unless-stopped
+    environment:
+      - FREQTRADE_UI_HOST=${FREQTRADE_UI_HOST:-localhost}
+      # dry-run paper money (applied at the bot's next start; keep it equal to the capital ledger of this bot, see ENVIRONMENT_VARIABLES.md)
+      - FREQTRADE__DRY_RUN_WALLET=${TREND_V2_DRY_RUN_WALLET:-500}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE_API_JWT_SECRET:-}
+      - FREQTRADE__EXCHANGE__KEY=${BYBIT_TREND_V2_API_KEY:-}
+      - FREQTRADE__EXCHANGE__SECRET=${BYBIT_TREND_V2_API_SECRET:-}
+      - FREQTRADE__DRY_RUN=${FREQTRADE_TREND_V2__DRY_RUN:-true}
+      # Keep the default equal to config.json's max_open_trades (10): an env
+      # value here overrides the file (see the Listing Fade lesson in AGENTS.md).
+      - FREQTRADE__MAX_OPEN_TRADES=${TREND_V2_MAX_OPEN_TRADES:-10}
+      # Second, independent live gate -- on top of FREQTRADE_TREND_V2__DRY_RUN.
+      - TREND_V2_LIVE_MODE=${TREND_V2_LIVE_MODE:-false}
+    volumes:
+      - freqtrade-trend-v2-db:/freqtrade/user_data/db
+      - allocator-shared:/allocator:ro   # P20
+    ports:
+      - "8200:8080"
+    # CORS origins of the bot UIs come from FREQTRADE_UI_HOST (see entrypoint-cors.sh in the bot directory)
+    entrypoint: ["/freqtrade/entrypoint-cors.sh"]
+    command: >
+      trade
+      --db-url sqlite:////freqtrade/user_data/db/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --logfile /freqtrade/user_data/db/freqtrade.log
+      --strategy TrendV2Strategy
+
+  # P17-C: control group. Two deliberately naive baselines (Freqtrade's own
+  # sample_strategy.py, copied verbatim) trading the same pairs/wallet/fees as
+  # Main and Shorts, so every "smart" bot has something to be measured against.
+  # HARD dry-run: the config has dry_run:true and NO exchange keys, and this
+  # service intentionally sets NO FREQTRADE__DRY_RUN / FREQTRADE__EXCHANGE__*
+  # / FREQTRADE__MAX_OPEN_TRADES env (an env var here would silently override
+  # config.json -- the Listing Fade lesson). There is no live mode.
+  # Image is pinned (freqtradeorg/freqtrade:2026.8, see the Dockerfile).
+  # Shares the stack's single FREQTRADE_API_* login (freqtrade_client logs into
+  # every bot with one account); not part of payout_state.SPLIT_BOTS.
+  freqtrade-control-long:
+    build:
+      context: ./freqtrade-control-long
+      dockerfile: Dockerfile
+    container_name: freqtrade-control-long
+    restart: unless-stopped
+    environment:
+      - FREQTRADE_UI_HOST=${FREQTRADE_UI_HOST:-localhost}
+      # dry-run paper money (applied at the bot's next start; keep it equal to the capital ledger of this bot, see ENVIRONMENT_VARIABLES.md)
+      - FREQTRADE__DRY_RUN_WALLET=${CONTROL_LONG_DRY_RUN_WALLET:-500}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE_API_JWT_SECRET:-}
+    volumes:
+      - freqtrade-control-long-db:/freqtrade/user_data/db
+    ports:
+      - "8180:8080"
+    # CORS origins of the bot UIs come from FREQTRADE_UI_HOST (see entrypoint-cors.sh in the bot directory)
+    entrypoint: ["/freqtrade/entrypoint-cors.sh"]
+    command: >
+      trade
+      --db-url sqlite:////freqtrade/user_data/db/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --logfile /freqtrade/user_data/db/freqtrade.log
+      --strategy ControlLongStrategy
+
+  freqtrade-control-short:
+    build:
+      context: ./freqtrade-control-short
+      dockerfile: Dockerfile
+    container_name: freqtrade-control-short
+    restart: unless-stopped
+    environment:
+      - FREQTRADE_UI_HOST=${FREQTRADE_UI_HOST:-localhost}
+      # dry-run paper money (applied at the bot's next start; keep it equal to the capital ledger of this bot, see ENVIRONMENT_VARIABLES.md)
+      - FREQTRADE__DRY_RUN_WALLET=${CONTROL_SHORT_DRY_RUN_WALLET:-500}
+      - FREQTRADE__API_SERVER__USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE_API_JWT_SECRET:-}
+    volumes:
+      - freqtrade-control-short-db:/freqtrade/user_data/db
+    ports:
+      - "8190:8080"
+    # CORS origins of the bot UIs come from FREQTRADE_UI_HOST (see entrypoint-cors.sh in the bot directory)
+    entrypoint: ["/freqtrade/entrypoint-cors.sh"]
+    command: >
+      trade
+      --db-url sqlite:////freqtrade/user_data/db/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --logfile /freqtrade/user_data/db/freqtrade.log
+      --strategy ControlShortStrategy
+
+  # P20.4 part B: Kronos forecasts as a free SIGNAL for the P19 ledger. CPU only, capped so it cannot starve the bots, read-only towards them
+  # (GET /whitelist and /pair_candles), never trades and is never managed. The Dockerfile checks the free disk itself during the build (fails below 3 GB).
+  kronos-signal:
+    build:
+      context: ./kronos-signal
+    container_name: kronos-signal
+    restart: unless-stopped
+    cpus: 2.0
+    cpu_shares: 256
+    mem_limit: 1g
+    pids_limit: 256
+    environment:
+      - FREQTRADE_API_USERNAME=${FREQTRADE_API_USERNAME:-}
+      - FREQTRADE_API_PASSWORD=${FREQTRADE_API_PASSWORD:-}
+      - KRONOS_MODE=${KRONOS_MODE:-on}
+      - KRONOS_MAX_PAIRS=${KRONOS_MAX_PAIRS:-45}
+      - KRONOS_CYCLE_BUDGET_S=${KRONOS_CYCLE_BUDGET_S:-900}
+      - KRONOS_RANK_MIN_N=${KRONOS_RANK_MIN_N:-8}
+      - KRONOS_RANK_MIN_SCORE=${KRONOS_RANK_MIN_SCORE:-0.003}
+      - KRONOS_THRESHOLD=${KRONOS_THRESHOLD:-0.005}
+      - KRONOS_SAMPLES=${KRONOS_SAMPLES:-3}
+      - KRONOS_SKIP_BOTS=${KRONOS_SKIP_BOTS:-}
+      - KRONOS_THREADS=2
+      - KRONOS_OUT_DIR=/kronos
+    volumes:
+      - kronos-data:/kronos
+
+  # P22 K2: generates HISTORICAL Kronos signals for the /replay page. CPU only, nice 10, idle (no model loaded, no CPU) until survival-agent writes a job into the shared
+  # volume; weights and model code are baked into the image at pinned revisions (sha256-verified in the build), so nothing is downloaded at run time. Never trades, never managed.
+  kronos-replay:
+    build:
+      context: ./kronos-replay
+    container_name: kronos-replay
+    restart: unless-stopped
+    cpus: 2.0
+    cpu_shares: 128
+    mem_limit: 1g
+    pids_limit: 256
+    environment:
+      - KRONOS_THREADS=2
+      - KRONOS_REPLAY_DIR=/kronos-replay
+    volumes:
+      - kronos-replay-data:/kronos-replay
+
+volumes:
+  freqtrade-db:
+  freqtrade-shorts-db:
+  freqtrade-moonshot-db:
+  freqtrade-listing-fade-db:
+  freqtrade-trend-ensemble-db:
+  freqtrade-control-long-db:
+  freqtrade-control-short-db:
+  freqtrade-trend-v2-db:
+  survival-agent-data:
+  allocator-shared:
+  kronos-data:
+  kronos-replay-data:

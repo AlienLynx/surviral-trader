@@ -1,0 +1,836 @@
+{
+  "grid": {
+    "rows": [
+      {
+        "exit_channel": 10,
+        "min_votes": 2,
+        "total_return_pct": 22.27,
+        "profit_abs": 111.36,
+        "cagr_pct": 6.94,
+        "sharpe": 0.174,
+        "sortino": 0.823,
+        "calmar": 0.949,
+        "max_dd_pct": 40.98,
+        "trades": 206,
+        "long_trades": 87,
+        "short_trades": 119,
+        "long_profit_abs": 152.23,
+        "short_profit_abs": -40.87,
+        "expectancy_usd": 0.541,
+        "expectancy_ratio": 0.142,
+        "profit_factor": 1.22,
+        "win_rate_pct": 35.4,
+        "sqn": 0.692,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      {
+        "exit_channel": 10,
+        "min_votes": 3,
+        "total_return_pct": 2.01,
+        "profit_abs": 10.06,
+        "cagr_pct": 0.67,
+        "sharpe": 0.018,
+        "sortino": 0.071,
+        "calmar": 0.097,
+        "max_dd_pct": 36.17,
+        "trades": 180,
+        "long_trades": 78,
+        "short_trades": 102,
+        "long_profit_abs": 78.0,
+        "short_profit_abs": -67.93,
+        "expectancy_usd": 0.056,
+        "expectancy_ratio": 0.013,
+        "profit_factor": 1.02,
+        "win_rate_pct": 33.9,
+        "sqn": 0.077,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      {
+        "exit_channel": 10,
+        "min_votes": 4,
+        "total_return_pct": 5.52,
+        "profit_abs": 27.59,
+        "cagr_pct": 1.81,
+        "sharpe": 0.046,
+        "sortino": 0.193,
+        "calmar": 0.256,
+        "max_dd_pct": 37.66,
+        "trades": 144,
+        "long_trades": 69,
+        "short_trades": 75,
+        "long_profit_abs": 72.14,
+        "short_profit_abs": -44.55,
+        "expectancy_usd": 0.192,
+        "expectancy_ratio": 0.045,
+        "profit_factor": 1.065,
+        "win_rate_pct": 30.6,
+        "sqn": 0.217,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      {
+        "exit_channel": 20,
+        "min_votes": 2,
+        "total_return_pct": -6.87,
+        "profit_abs": -34.33,
+        "cagr_pct": -2.35,
+        "sharpe": -0.076,
+        "sortino": -0.264,
+        "calmar": -0.305,
+        "max_dd_pct": 39.32,
+        "trades": 163,
+        "long_trades": 73,
+        "short_trades": 90,
+        "long_profit_abs": 36.46,
+        "short_profit_abs": -70.79,
+        "expectancy_usd": -0.211,
+        "expectancy_ratio": -0.051,
+        "profit_factor": 0.928,
+        "win_rate_pct": 29.4,
+        "sqn": -0.341,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      {
+        "exit_channel": 20,
+        "min_votes": 3,
+        "total_return_pct": -0.85,
+        "profit_abs": -4.25,
+        "cagr_pct": -0.28,
+        "sharpe": -0.007,
+        "sortino": -0.032,
+        "calmar": -0.035,
+        "max_dd_pct": 42.61,
+        "trades": 148,
+        "long_trades": 66,
+        "short_trades": 82,
+        "long_profit_abs": 58.4,
+        "short_profit_abs": -62.66,
+        "expectancy_usd": -0.029,
+        "expectancy_ratio": -0.006,
+        "profit_factor": 0.992,
+        "win_rate_pct": 29.7,
+        "sqn": -0.031,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      {
+        "exit_channel": 20,
+        "min_votes": 4,
+        "total_return_pct": 0.53,
+        "profit_abs": 2.66,
+        "cagr_pct": 0.18,
+        "sharpe": 0.004,
+        "sortino": 0.017,
+        "calmar": 0.023,
+        "max_dd_pct": 40.59,
+        "trades": 117,
+        "long_trades": 60,
+        "short_trades": 57,
+        "long_profit_abs": 27.63,
+        "short_profit_abs": -24.97,
+        "expectancy_usd": 0.023,
+        "expectancy_ratio": 0.004,
+        "profit_factor": 1.006,
+        "win_rate_pct": 25.6,
+        "sqn": 0.02,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      }
+    ],
+    "smoothed": {
+      "ch10_v2": 0.09599999999999999,
+      "ch10_v3": 0.07933333333333333,
+      "ch10_v4": 0.032,
+      "ch20_v2": -0.0415,
+      "ch20_v3": -0.026333333333333334,
+      "ch20_v4": -0.0015
+    },
+    "chosen": {
+      "exit_channel": 10,
+      "min_votes": 2
+    }
+  },
+  "runs": {
+    "train_v1": {
+      "headline": {
+        "total_return_pct": -10.72,
+        "profit_abs": -53.62,
+        "cagr_pct": -4.79,
+        "sharpe": -0.704,
+        "sortino": -1.882,
+        "calmar": -1.291,
+        "max_dd_pct": 18.8,
+        "trades": 264,
+        "long_trades": 264,
+        "short_trades": 0,
+        "long_profit_abs": -53.62,
+        "short_profit_abs": 0.0,
+        "expectancy_usd": -0.203,
+        "expectancy_ratio": -0.1,
+        "profit_factor": 0.768,
+        "win_rate_pct": 56.8,
+        "sqn": -1.912,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      "by_year": [
+        {
+          "year": 2021,
+          "trades": 11,
+          "profit_abs": -4.68,
+          "win_rate_pct": 54.5
+        },
+        {
+          "year": 2022,
+          "trades": 89,
+          "profit_abs": -61.29,
+          "win_rate_pct": 46.1
+        },
+        {
+          "year": 2023,
+          "trades": 164,
+          "profit_abs": 12.36,
+          "win_rate_pct": 62.8
+        }
+      ],
+      "by_leg": [
+        {
+          "leg": "long",
+          "trades": 264,
+          "profit_abs": -53.62,
+          "avg_profit_pct": -1.33,
+          "expectancy_usd": -0.203,
+          "win_rate_pct": 56.8,
+          "funding_fees_total": 0.0
+        }
+      ],
+      "by_regime": [
+        {
+          "btc_vs_200d": "above",
+          "leg": "long",
+          "trades": 146,
+          "profit_abs": -23.16,
+          "avg_profit_pct": -1.22,
+          "win_rate_pct": 56.8
+        },
+        {
+          "btc_vs_200d": "below",
+          "leg": "long",
+          "trades": 118,
+          "profit_abs": -30.46,
+          "avg_profit_pct": -1.47,
+          "win_rate_pct": 56.8
+        }
+      ],
+      "tail": {
+        "total": -53.62,
+        "best_trade": 4.26,
+        "total_excl_best": -57.87,
+        "total_excl_top3": -64.89,
+        "best_pair": "BTC/USDT"
+      },
+      "exit_mix": [
+        {
+          "leg": "long",
+          "exit": "force_exit",
+          "n": 7,
+          "profit": -3.3,
+          "avg_pct": -3.27,
+          "avg_days": 20.1
+        },
+        {
+          "leg": "long",
+          "exit": "stop_loss",
+          "n": 109,
+          "profit": -226.93,
+          "avg_pct": -15.24,
+          "avg_days": 12.7
+        },
+        {
+          "leg": "long",
+          "exit": "trailing_stop_loss",
+          "n": 148,
+          "profit": 176.61,
+          "avg_pct": 9.01,
+          "avg_days": 8.1
+        }
+      ],
+      "window": "2021-09-08 00:00:00 -> 2023-12-31 00:00:00"
+    },
+    "test_v1": {
+      "headline": {
+        "total_return_pct": -1.56,
+        "profit_abs": -7.78,
+        "cagr_pct": -0.57,
+        "sharpe": -0.083,
+        "sortino": -0.175,
+        "calmar": -0.246,
+        "max_dd_pct": 12.1,
+        "trades": 347,
+        "long_trades": 347,
+        "short_trades": 0,
+        "long_profit_abs": -7.78,
+        "short_profit_abs": 0.0,
+        "expectancy_usd": -0.022,
+        "expectancy_ratio": -0.011,
+        "profit_factor": 0.971,
+        "win_rate_pct": 60.8,
+        "sqn": -0.232,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      "by_year": [
+        {
+          "year": 2024,
+          "trades": 171,
+          "profit_abs": 14.17,
+          "win_rate_pct": 65.5
+        },
+        {
+          "year": 2025,
+          "trades": 94,
+          "profit_abs": -14.61,
+          "win_rate_pct": 56.4
+        },
+        {
+          "year": 2026,
+          "trades": 82,
+          "profit_abs": -7.34,
+          "win_rate_pct": 56.1
+        }
+      ],
+      "by_leg": [
+        {
+          "leg": "long",
+          "trades": 347,
+          "profit_abs": -7.78,
+          "avg_profit_pct": -0.34,
+          "expectancy_usd": -0.022,
+          "win_rate_pct": 60.8,
+          "funding_fees_total": 0.0
+        }
+      ],
+      "by_regime": [
+        {
+          "btc_vs_200d": "above",
+          "leg": "long",
+          "trades": 281,
+          "profit_abs": -5.82,
+          "avg_profit_pct": -0.07,
+          "win_rate_pct": 61.9
+        },
+        {
+          "btc_vs_200d": "below",
+          "leg": "long",
+          "trades": 66,
+          "profit_abs": -1.96,
+          "avg_profit_pct": -1.46,
+          "win_rate_pct": 56.1
+        }
+      ],
+      "tail": {
+        "total": -7.78,
+        "best_trade": 4.78,
+        "total_excl_best": -12.57,
+        "total_excl_top3": -21.99,
+        "best_pair": "BTC/USDT"
+      },
+      "exit_mix": [
+        {
+          "leg": "long",
+          "exit": "force_exit",
+          "n": 9,
+          "profit": -3.35,
+          "avg_pct": -1.83,
+          "avg_days": 21.0
+        },
+        {
+          "leg": "long",
+          "exit": "stop_loss",
+          "n": 129,
+          "profit": -267.86,
+          "avg_pct": -15.25,
+          "avg_days": 14.3
+        },
+        {
+          "leg": "long",
+          "exit": "trailing_stop_loss",
+          "n": 209,
+          "profit": 263.43,
+          "avg_pct": 8.93,
+          "avg_days": 9.4
+        }
+      ],
+      "window": "2024-01-01 00:00:00 -> 2026-09-28 00:00:00"
+    },
+    "test_v2_long": {
+      "headline": {
+        "total_return_pct": 26.34,
+        "profit_abs": 131.68,
+        "cagr_pct": 8.9,
+        "sharpe": 0.132,
+        "sortino": 0.828,
+        "calmar": 1.171,
+        "max_dd_pct": 42.94,
+        "trades": 190,
+        "long_trades": 190,
+        "short_trades": 0,
+        "long_profit_abs": 131.68,
+        "short_profit_abs": 0.0,
+        "expectancy_usd": 0.693,
+        "expectancy_ratio": 0.123,
+        "profit_factor": 1.181,
+        "win_rate_pct": 32.1,
+        "sqn": 0.499,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      "by_year": [
+        {
+          "year": 2024,
+          "trades": 88,
+          "profit_abs": 64.96,
+          "win_rate_pct": 29.5
+        },
+        {
+          "year": 2025,
+          "trades": 86,
+          "profit_abs": -58.41,
+          "win_rate_pct": 24.4
+        },
+        {
+          "year": 2026,
+          "trades": 16,
+          "profit_abs": 125.13,
+          "win_rate_pct": 87.5
+        }
+      ],
+      "by_leg": [
+        {
+          "leg": "long",
+          "trades": 190,
+          "profit_abs": 131.68,
+          "avg_profit_pct": 1.62,
+          "expectancy_usd": 0.693,
+          "win_rate_pct": 32.1,
+          "funding_fees_total": -75.72
+        }
+      ],
+      "by_regime": [
+        {
+          "btc_vs_200d": "above",
+          "leg": "long",
+          "trades": 190,
+          "profit_abs": 131.68,
+          "avg_profit_pct": 1.62,
+          "win_rate_pct": 32.1
+        }
+      ],
+      "tail": {
+        "total": 131.68,
+        "best_trade": 174.66,
+        "total_excl_best": -42.98,
+        "total_excl_top3": -237.79,
+        "best_pair": "XRP/USDT:USDT"
+      },
+      "exit_mix": [
+        {
+          "leg": "long",
+          "exit": "donchian_exit_long",
+          "n": 124,
+          "profit": 426.31,
+          "avg_pct": 8.18,
+          "avg_days": 23.7
+        },
+        {
+          "leg": "long",
+          "exit": "force_exit",
+          "n": 10,
+          "profit": 90.29,
+          "avg_pct": 15.72,
+          "avg_days": 14.1
+        },
+        {
+          "leg": "long",
+          "exit": "stop_loss",
+          "n": 56,
+          "profit": -384.92,
+          "avg_pct": -15.44,
+          "avg_days": 9.2
+        }
+      ],
+      "window": "2024-01-01 00:00:00 -> 2026-09-28 00:00:00"
+    },
+    "test_v2_ls": {
+      "headline": {
+        "total_return_pct": -13.77,
+        "profit_abs": -68.84,
+        "cagr_pct": -5.26,
+        "sharpe": -0.19,
+        "sortino": -0.5,
+        "calmar": -0.536,
+        "max_dd_pct": 49.03,
+        "trades": 271,
+        "long_trades": 167,
+        "short_trades": 104,
+        "long_profit_abs": -44.78,
+        "short_profit_abs": -24.06,
+        "expectancy_usd": -0.254,
+        "expectancy_ratio": -0.065,
+        "profit_factor": 0.9,
+        "win_rate_pct": 35.1,
+        "sqn": -0.604,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      "by_year": [
+        {
+          "year": 2024,
+          "trades": 99,
+          "profit_abs": -106.99,
+          "win_rate_pct": 30.3
+        },
+        {
+          "year": 2025,
+          "trades": 97,
+          "profit_abs": -100.96,
+          "win_rate_pct": 29.9
+        },
+        {
+          "year": 2026,
+          "trades": 75,
+          "profit_abs": 139.11,
+          "win_rate_pct": 48.0
+        }
+      ],
+      "by_leg": [
+        {
+          "leg": "long",
+          "trades": 167,
+          "profit_abs": -44.78,
+          "avg_profit_pct": -0.13,
+          "expectancy_usd": -0.268,
+          "win_rate_pct": 35.3,
+          "funding_fees_total": -58.76
+        },
+        {
+          "leg": "short",
+          "trades": 104,
+          "profit_abs": -24.06,
+          "avg_profit_pct": -0.64,
+          "expectancy_usd": -0.231,
+          "win_rate_pct": 34.6,
+          "funding_fees_total": 0.65
+        }
+      ],
+      "by_regime": [
+        {
+          "btc_vs_200d": "above",
+          "leg": "long",
+          "trades": 167,
+          "profit_abs": -44.78,
+          "avg_profit_pct": -0.13,
+          "win_rate_pct": 35.3
+        },
+        {
+          "btc_vs_200d": "below",
+          "leg": "short",
+          "trades": 104,
+          "profit_abs": -24.06,
+          "avg_profit_pct": -0.64,
+          "win_rate_pct": 34.6
+        }
+      ],
+      "tail": {
+        "total": -68.84,
+        "best_trade": 38.88,
+        "total_excl_best": -107.71,
+        "total_excl_top3": -165.9,
+        "best_pair": "DOGE/USDT:USDT"
+      },
+      "exit_mix": [
+        {
+          "leg": "long",
+          "exit": "donchian_exit_long",
+          "n": 113,
+          "profit": 136.84,
+          "avg_pct": 3.79,
+          "avg_days": 25.0
+        },
+        {
+          "leg": "long",
+          "exit": "force_exit",
+          "n": 10,
+          "profit": 74.53,
+          "avg_pct": 22.88,
+          "avg_days": 15.2
+        },
+        {
+          "leg": "long",
+          "exit": "stop_loss",
+          "n": 44,
+          "profit": -256.15,
+          "avg_pct": -15.41,
+          "avg_days": 8.2
+        },
+        {
+          "leg": "short",
+          "exit": "donchian_exit_short",
+          "n": 85,
+          "profit": 58.34,
+          "avg_pct": 2.62,
+          "avg_days": 26.5
+        },
+        {
+          "leg": "short",
+          "exit": "stop_loss",
+          "n": 19,
+          "profit": -82.4,
+          "avg_pct": -15.22,
+          "avg_days": 9.6
+        }
+      ],
+      "window": "2024-01-01 00:00:00 -> 2026-09-28 00:00:00"
+    },
+    "test_control_long": {
+      "headline": {
+        "total_return_pct": -92.1,
+        "profit_abs": -460.49,
+        "cagr_pct": -60.33,
+        "sharpe": -9.95,
+        "sortino": -6.423,
+        "calmar": -1.904,
+        "max_dd_pct": 92.21,
+        "trades": 5141,
+        "long_trades": 5141,
+        "short_trades": 0,
+        "long_profit_abs": -460.49,
+        "short_profit_abs": 0.0,
+        "expectancy_usd": -0.09,
+        "expectancy_ratio": -0.05,
+        "profit_factor": 0.653,
+        "win_rate_pct": 85.7,
+        "sqn": -7.278,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      "by_year": [
+        {
+          "year": 2024,
+          "trades": 2579,
+          "profit_abs": -328.93,
+          "win_rate_pct": 86.2
+        },
+        {
+          "year": 2025,
+          "trades": 2437,
+          "profit_abs": -124.52,
+          "win_rate_pct": 85.5
+        },
+        {
+          "year": 2026,
+          "trades": 125,
+          "profit_abs": -7.04,
+          "win_rate_pct": 79.2
+        }
+      ],
+      "by_leg": [
+        {
+          "leg": "long",
+          "trades": 5141,
+          "profit_abs": -460.49,
+          "avg_profit_pct": -0.44,
+          "expectancy_usd": -0.09,
+          "win_rate_pct": 85.7,
+          "funding_fees_total": 0.0
+        }
+      ],
+      "by_regime": [
+        {
+          "btc_vs_200d": "above",
+          "leg": "long",
+          "trades": 3993,
+          "profit_abs": -455.45,
+          "avg_profit_pct": -0.52,
+          "win_rate_pct": 84.9
+        },
+        {
+          "btc_vs_200d": "below",
+          "leg": "long",
+          "trades": 1148,
+          "profit_abs": -5.04,
+          "avg_profit_pct": -0.14,
+          "win_rate_pct": 88.5
+        }
+      ],
+      "tail": {
+        "total": -460.49,
+        "best_trade": 1.84,
+        "total_excl_best": -462.34,
+        "total_excl_top3": -466.02,
+        "best_pair": "AVAX/USDT"
+      },
+      "exit_mix": [
+        {
+          "leg": "long",
+          "exit": "exit_signal",
+          "n": 85,
+          "profit": -35.59,
+          "avg_pct": -2.2,
+          "avg_days": 3.6
+        },
+        {
+          "leg": "long",
+          "exit": "roi",
+          "n": 4392,
+          "profit": 864.67,
+          "avg_pct": 1.09,
+          "avg_days": 0.8
+        },
+        {
+          "leg": "long",
+          "exit": "stop_loss",
+          "n": 664,
+          "profit": -1289.58,
+          "avg_pct": -10.27,
+          "avg_days": 2.8
+        }
+      ],
+      "window": "2024-01-01 00:00:00 -> 2026-09-29 10:00:00"
+    },
+    "test_control_short": {
+      "headline": {
+        "total_return_pct": -13.3,
+        "profit_abs": -66.48,
+        "cagr_pct": -5.06,
+        "sharpe": -0.979,
+        "sortino": -0.75,
+        "calmar": -1.849,
+        "max_dd_pct": 13.71,
+        "trades": 440,
+        "long_trades": 0,
+        "short_trades": 440,
+        "long_profit_abs": 0.0,
+        "short_profit_abs": -66.48,
+        "expectancy_usd": -0.151,
+        "expectancy_ratio": -0.098,
+        "profit_factor": 0.667,
+        "win_rate_pct": 70.5,
+        "sqn": -2.445,
+        "fees_note": "fee ratio applied both sides; funding fees included for futures"
+      },
+      "by_year": [
+        {
+          "year": 2024,
+          "trades": 156,
+          "profit_abs": -47.07,
+          "win_rate_pct": 67.9
+        },
+        {
+          "year": 2025,
+          "trades": 170,
+          "profit_abs": 1.69,
+          "win_rate_pct": 75.3
+        },
+        {
+          "year": 2026,
+          "trades": 114,
+          "profit_abs": -21.1,
+          "win_rate_pct": 66.7
+        }
+      ],
+      "by_leg": [
+        {
+          "leg": "short",
+          "trades": 440,
+          "profit_abs": -66.48,
+          "avg_profit_pct": -0.31,
+          "expectancy_usd": -0.151,
+          "win_rate_pct": 70.5,
+          "funding_fees_total": 1.99
+        }
+      ],
+      "by_regime": [
+        {
+          "btc_vs_200d": "above",
+          "leg": "short",
+          "trades": 270,
+          "profit_abs": -36.83,
+          "avg_profit_pct": -0.28,
+          "win_rate_pct": 72.6
+        },
+        {
+          "btc_vs_200d": "below",
+          "leg": "short",
+          "trades": 170,
+          "profit_abs": -29.65,
+          "avg_profit_pct": -0.37,
+          "win_rate_pct": 67.1
+        }
+      ],
+      "tail": {
+        "total": -66.48,
+        "best_trade": 1.97,
+        "total_excl_best": -68.45,
+        "total_excl_top3": -71.37,
+        "best_pair": "UNI/USDT:USDT"
+      },
+      "exit_mix": [
+        {
+          "leg": "short",
+          "exit": "exit_signal",
+          "n": 158,
+          "profit": -74.85,
+          "avg_pct": -1.07,
+          "avg_days": 0.7
+        },
+        {
+          "leg": "short",
+          "exit": "roi",
+          "n": 257,
+          "profit": 125.73,
+          "avg_pct": 1.11,
+          "avg_days": 0.2
+        },
+        {
+          "leg": "short",
+          "exit": "stop_loss",
+          "n": 25,
+          "profit": -117.36,
+          "avg_pct": -10.18,
+          "avg_days": 0.9
+        }
+      ],
+      "window": "2024-01-01 00:00:00 -> 2026-09-29 10:10:00"
+    }
+  },
+  "gates": {
+    "max drawdown <= 30% (fees on)": {
+      "pass": false,
+      "value": "49.03%"
+    },
+    ">= 100 trades (long+short together)": {
+      "pass": true,
+      "value": "271"
+    },
+    "short leg not below zero": {
+      "pass": false,
+      "value": "$-24.06"
+    }
+  },
+  "admitted": false,
+  "buy_and_hold": {
+    "btc": {
+      "label": "BTC buy-and-hold",
+      "total_return_pct": 88.48,
+      "cagr_pct": 26.02,
+      "sharpe": 0.724,
+      "sortino": 1.107,
+      "calmar": 0.491,
+      "max_dd_pct": 52.97,
+      "trades": 1
+    },
+    "equal_weight": {
+      "label": "Equal-weight hold (15 pairs)",
+      "total_return_pct": 16.79,
+      "cagr_pct": 5.83,
+      "sharpe": 0.398,
+      "sortino": 0.568,
+      "calmar": 0.088,
+      "max_dd_pct": 65.85,
+      "trades": 1
+    }
+  }
+}

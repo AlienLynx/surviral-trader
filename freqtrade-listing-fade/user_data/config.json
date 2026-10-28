@@ -1,0 +1,95 @@
+{
+  "max_open_trades": 3,
+  "stake_currency": "USDT",
+  "stake_amount": 25,
+  "tradable_balance_ratio": 1.0,
+  "dry_run": true,
+  "dry_run_wallet": 100,
+  "cancel_open_orders_on_exit": true,
+  "trading_mode": "futures",
+  "margin_mode": "isolated",
+  "unfilledtimeout": {
+    "entry": 10,
+    "exit": 10,
+    "exit_timeout_count": 0,
+    "unit": "minutes"
+  },
+  "entry_pricing": {
+    "price_side": "same",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "exit_pricing": {
+    "price_side": "same",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "exchange": {
+    "name": "bybit",
+    "key": "",
+    "secret": "",
+    "ccxt_config": {
+      "options": {
+        "defaultType": "swap"
+      }
+    },
+    "ccxt_async_config": {
+      "options": {
+        "defaultType": "swap"
+      }
+    },
+    "pair_whitelist": [
+      ".*/USDT:USDT"
+    ],
+    "pair_blacklist": [
+      "USDC/USDT:USDT",
+      "DAI/USDT:USDT",
+      "TUSD/USDT:USDT",
+      "FDUSD/USDT:USDT",
+      ".*UP/USDT:USDT",
+      ".*DOWN/USDT:USDT",
+      ".*BULL/USDT:USDT",
+      ".*BEAR/USDT:USDT",
+      ".*3L/USDT:USDT",
+      ".*3S/USDT:USDT"
+    ]
+  },
+  "pairlists": [
+    {
+      "method": "VolumePairList",
+      "number_assets": 200,
+      "sort_key": "quoteVolume",
+      "min_value": 0,
+      "refresh_period": 3600
+    },
+    {
+      "method": "AgeFilter",
+      "min_days_listed": 2,
+      "max_days_listed": 30
+    },
+    {
+      "method": "PriceFilter",
+      "low_price_ratio": 0.01
+    },
+    {
+      "method": "SpreadFilter",
+      "max_spread_ratio": 0.005
+    }
+  ],
+  "api_server": {
+    "enabled": true,
+    "listen_ip_address": "0.0.0.0",
+    "listen_port": 8080,
+    "verbosity": "error",
+    "enable_openapi": false,
+    "jwt_secret_key": "set-via-credentials-panel",
+    "CORS_origins": [],
+    "username": "set-via-credentials-panel",
+    "password": "set-via-credentials-panel"
+  },
+  "bot_name": "survival-agent-freqtrade-listing-fade",
+  "initial_state": "running",
+  "internals": {
+    "process_throttle_secs": 5
+  }
+}

@@ -1,0 +1,13 @@
+data/
+*.env
+.env
+.env.*
+!.env.example
+.mcp.json
+__pycache__/
+*.pyc
+.DS_Store
+freqtrade/user_data/backtest_results/
+freqtrade/user_data/hyperopt_results/
+freqtrade/user_data/notebooks/
+backtest/results/
